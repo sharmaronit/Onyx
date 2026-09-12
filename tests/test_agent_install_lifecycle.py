@@ -26,9 +26,10 @@ class AgentInstallLifecycleTests(unittest.TestCase):
         self.assertIn("launchctl bootstrap", script)
         self.assertIn("Open Onyx Agent", script)
 
-    def test_windows_installer_starts_idle_service_and_includes_desktop(self):
+    def test_windows_installer_defers_first_service_start_and_includes_desktop(self):
         wix = Path("agent/packaging/windows/OnyxAgent.wxs").read_text(encoding="utf-8")
-        self.assertIn('Start="install"', wix)
+        self.assertIn('Start="auto"', wix)
+        self.assertNotIn('Start="install"', wix)
         self.assertIn("OnyxDesktopExe", wix)
         self.assertIn("LaunchOnyxDesktop", wix)
         self.assertIn("Windows\\CurrentVersion\\Run", wix)

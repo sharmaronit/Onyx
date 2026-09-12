@@ -8,7 +8,14 @@
         <Component Id="AgentExecutable" Guid="*" Bitness="always64">
           <File Id="OnyxAgentExe" Source="$(var.AgentExe)" KeyPath="yes" />
           <ServiceInstall Id="OnyxService" Name="OnyxEndpointAgent" DisplayName="Onyx Endpoint Agent" Description="Collects configured Onyx endpoint security telemetry over HTTPS." Start="auto" Type="ownProcess" Account="LocalSystem" ErrorControl="normal" Arguments="service" />
-          <ServiceControl Id="OnyxServiceControl" Name="OnyxEndpointAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+          <!--
+            Do not start the service inside the MSI transaction.  A service that
+            is unpacking for the first time can be delayed by Defender, device
+            policy, or a pending reboot; treating that as an installer failure
+            rolls back an otherwise valid installation.  The auto-start service
+            starts on the next Windows boot.
+          -->
+          <ServiceControl Id="OnyxServiceControl" Name="OnyxEndpointAgent" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
         <Component Id="DesktopExecutable" Guid="*" Bitness="always64">
           <File Id="OnyxDesktopExe" Source="$(var.DesktopExe)" KeyPath="yes">

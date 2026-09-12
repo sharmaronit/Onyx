@@ -5,11 +5,11 @@ Onyx Agent includes a desktop status application and a privileged background ser
 ## Windows 10/11 x64
 
 1. Install the latest MSI as an administrator.
-2. Open **Onyx Agent** from the Start menu.
-3. Enter the HTTPS backend URL and one-use enrollment token in the enrollment screen.
+2. Restart Windows once after the installation. This starts the protected background service outside the MSI transaction.
+3. Open **Onyx Agent** from the Start menu and enter the HTTPS backend URL and one-use enrollment token in the enrollment screen.
 5. Verify with `Get-Service OnyxEndpointAgent`. Its status should be `Running`.
 
-The MSI starts the service during installation. Enrollment sends the one-use token through a local named pipe to that service. The service stores the resulting credential with machine-scope DPAPI; the desktop process never receives it.
+The MSI registers the service for automatic startup but does not force its first start while Windows Installer is still running. This avoids a rollback when endpoint protection, a pending reboot, or device policy temporarily delays a service. Enrollment sends the one-use token through a local named pipe to that service. The service stores the resulting credential with machine-scope DPAPI; the desktop process never receives it. If the service does not start after a restart, inspect the **Onyx Endpoint Agent** source in Event Viewer and `%ProgramData%\Onyx\logs\service-startup.jsonl`.
 
 ## macOS (Intel and Apple Silicon)
 
