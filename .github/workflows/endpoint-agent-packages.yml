@@ -29,13 +29,32 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: {name: OnyxAgent-windows-x64; path: agent/dist/OnyxAgent-*-windows-x64.*}
 
-  macos-dmg:
-    runs-on: macos-14
+  macos-binaries:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x64
+          - runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
-      - name: Build unsigned development DMG
-        run: ONYX_ALLOW_UNSIGNED_DEVELOPMENT_BUILD=1 bash agent/packaging/macos/build-package.sh '${{ inputs.version || '1.0.0' }}'
+      - name: Build native macOS agent binary
+        run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
       - uses: actions/upload-artifact@v4
-        with: {name: OnyxAgent-macos-arm64; path: agent/dist/OnyxAgent-*-macos.*}
+        with: {name: OnyxAgent-macos-${{ matrix.arch }}; path: agent/dist/OnyxAgent-${{ matrix.arch }}}
+
+  macos-universal-dmg:
+    needs: macos-binaries
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {path: agent/packaging/macos/artifacts, merge-multiple: true}
+      - name: Assemble universal macOS installer
+        run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.0.0' }}'
+      - uses: actions/upload-artifact@v4
+        with: {name: OnyxAgent-macos-universal; path: agent/dist/OnyxAgent-*-macos-universal.*}
