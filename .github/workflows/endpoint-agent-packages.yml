@@ -85,16 +85,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
       - name: Build native desktop companion
         working-directory: desktop
         run: |
           npm ci
           npm run tauri icon public/onyx-icon.svg
-          TARGET="${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}"
-          npm run tauri build -- --no-bundle --target "$TARGET"
-          cp "src-tauri/target/$TARGET/release/onyx-desktop" "../agent/dist/OnyxDesktop-${{ matrix.arch }}"
+          npm run tauri build -- --no-bundle
+          cp "src-tauri/target/release/onyx-desktop" "../agent/dist/OnyxDesktop-${{ matrix.arch }}"
       - name: Build native macOS agent binary
         run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
       - name: Generate native software bills of materials
