@@ -17,7 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
+        with:
+          python-version: '3.11'
       - name: Install WiX and agent dependencies
         shell: powershell
         run: |
@@ -27,7 +28,9 @@ jobs:
         shell: powershell
         run: agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.0.0' }}' -AllowUnsignedDevelopmentBuild
       - uses: actions/upload-artifact@v4
-        with: {name: OnyxAgent-windows-x64; path: agent/dist/OnyxAgent-*-windows-x64.*}
+        with:
+          name: OnyxAgent-windows-x64
+          path: agent/dist/OnyxAgent-*-windows-x64.*
 
   macos-binaries:
     strategy:
@@ -41,11 +44,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
+        with:
+          python-version: '3.11'
       - name: Build native macOS agent binary
         run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
       - uses: actions/upload-artifact@v4
-        with: {name: OnyxAgent-macos-${{ matrix.arch }}; path: agent/dist/OnyxAgent-${{ matrix.arch }}}
+        with:
+          name: OnyxAgent-macos-${{ matrix.arch }}
+          path: agent/dist/OnyxAgent-${{ matrix.arch }}
 
   macos-universal-dmg:
     needs: macos-binaries
@@ -53,8 +59,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: {path: agent/packaging/macos/artifacts, merge-multiple: true}
+        with:
+          path: agent/packaging/macos/artifacts
+          merge-multiple: true
       - name: Assemble universal macOS installer
         run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.0.0' }}'
       - uses: actions/upload-artifact@v4
-        with: {name: OnyxAgent-macos-universal; path: agent/dist/OnyxAgent-*-macos-universal.*}
+        with:
+          name: OnyxAgent-macos-universal
+          path: agent/dist/OnyxAgent-*-macos-universal.*
