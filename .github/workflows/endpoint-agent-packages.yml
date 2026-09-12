@@ -90,7 +90,8 @@ jobs:
         run: |
           npm ci
           npm run tauri icon public/onyx-icon.svg
-          npm run tauri build -- --no-bundle
+          npm run build
+          cargo build --release --manifest-path src-tauri/Cargo.toml
           cp "src-tauri/target/release/onyx-desktop" "../agent/dist/OnyxDesktop-${{ matrix.arch }}"
       - name: Build native macOS agent binary
         run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
