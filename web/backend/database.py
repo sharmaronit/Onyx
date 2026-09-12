@@ -104,6 +104,7 @@ def init_db() -> None:
     c.execute(
         """CREATE TABLE IF NOT EXISTS telemetry_events (
         id INTEGER PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT 'default',
         topology TEXT NOT NULL,
         source_node TEXT NOT NULL,
         event_id TEXT NOT NULL,
@@ -122,6 +123,7 @@ def init_db() -> None:
     c.execute(
         """CREATE TABLE IF NOT EXISTS endpoint_agents (
         endpoint_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT 'default',
         hostname TEXT NOT NULL,
         ip_address TEXT,
         topology TEXT NOT NULL,
@@ -298,6 +300,22 @@ def init_db() -> None:
         last_used_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS agent_ingest_batches (
+        endpoint_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        event_count INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(endpoint_id, batch_id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS agent_audit_events (
+        id INTEGER PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        endpoint_id TEXT,
+        event_type TEXT NOT NULL,
+        detail_json TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
 
     # Additive migrations for databases created by earlier Onyx versions.
     response_columns = {
@@ -309,6 +327,13 @@ def init_db() -> None:
         c.execute(
             "ALTER TABLE response_commands ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
         )
+    telemetry_columns = {row[1] for row in c.execute("PRAGMA table_info(telemetry_events)").fetchall()}
+    if "organization_id" not in telemetry_columns:
+        c.execute("ALTER TABLE telemetry_events ADD COLUMN organization_id TEXT NOT NULL DEFAULT 'default'")
+    endpoint_columns = {row[1] for row in c.execute("PRAGMA table_info(endpoint_agents)").fetchall()}
+    if "organization_id" not in endpoint_columns:
+        c.execute("ALTER TABLE endpoint_agents ADD COLUMN organization_id TEXT NOT NULL DEFAULT 'default'")
+    c.execute("CREATE INDEX IF NOT EXISTS telemetry_events_org_time ON telemetry_events(organization_id, event_timestamp DESC)")
 
     conn.commit()
     conn.close()
@@ -424,7 +449,7 @@ def list_vulnerability_findings(topology: str, limit: int = 1000) -> List[Dict[s
     return findings
 
 
-def store_telemetry_events(topology: str, events: List[Dict[str, Any]]) -> int:
+def store_telemetry_events(topology: str, events: List[Dict[str, Any]], organization_id: str = "default") -> int:
     """Persist normalized telemetry idempotently and return the insert count."""
     init_db()
     inserted = 0
@@ -433,9 +458,10 @@ def store_telemetry_events(topology: str, events: List[Dict[str, Any]]) -> int:
         for event in events:
             cursor = conn.execute(
                 """INSERT OR IGNORE INTO telemetry_events
-                (topology, source_node, event_id, event_type, event_timestamp, event_json)
-                VALUES (?, ?, ?, ?, ?, ?)""",
+                (organization_id, topology, source_node, event_id, event_type, event_timestamp, event_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    organization_id,
                     topology,
                     str(event.get("source_node") or "unknown_source"),
                     str(event.get("event_id") or ""),
@@ -448,15 +474,14 @@ def store_telemetry_events(topology: str, events: List[Dict[str, Any]]) -> int:
     return inserted
 
 
-def get_telemetry_events(topology: str, limit: int = 500) -> List[Dict[str, Any]]:
+def get_telemetry_events(topology: str, limit: int = 500, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
     init_db()
     safe_limit = max(1, min(int(limit), 5000))
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
-        rows = conn.execute(
-            """SELECT event_json FROM telemetry_events
-            WHERE topology = ? ORDER BY event_timestamp DESC LIMIT ?""",
-            (topology, safe_limit),
-        ).fetchall()
+        if organization_id:
+            rows = conn.execute("SELECT event_json FROM telemetry_events WHERE topology = ? AND organization_id = ? ORDER BY event_timestamp DESC LIMIT ?", (topology, organization_id, safe_limit)).fetchall()
+        else:
+            rows = conn.execute("SELECT event_json FROM telemetry_events WHERE topology = ? ORDER BY event_timestamp DESC LIMIT ?", (topology, safe_limit)).fetchall()
     return [json.loads(row[0]) for row in rows]
 
 
@@ -465,9 +490,9 @@ def upsert_endpoint_heartbeat(endpoint: Dict[str, Any]) -> Dict[str, Any]:
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
         conn.execute(
             """INSERT INTO endpoint_agents
-            (endpoint_id, hostname, ip_address, topology, agent_version, platform,
+            (endpoint_id, organization_id, hostname, ip_address, topology, agent_version, platform,
              quarantined, last_error, metadata_json, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(endpoint_id) DO UPDATE SET
                 hostname=excluded.hostname,
                 ip_address=excluded.ip_address,
@@ -480,6 +505,7 @@ def upsert_endpoint_heartbeat(endpoint: Dict[str, Any]) -> Dict[str, Any]:
                 last_seen_at=CURRENT_TIMESTAMP""",
             (
                 endpoint["endpoint_id"],
+                str(endpoint.get("organization_id") or "default"),
                 endpoint["hostname"],
                 endpoint.get("ip_address"),
                 endpoint["topology"],
@@ -932,6 +958,53 @@ def authenticate_device(endpoint_id: str, credential_hash: str) -> bool:
             (endpoint_id, credential_hash),
         )
         return cursor.rowcount == 1
+
+
+def get_authenticated_device(endpoint_id: str, credential_hash: str) -> Optional[Dict[str, Any]]:
+    """Authenticate and return the credential binding used for organization scoping."""
+    if not authenticate_device(endpoint_id, credential_hash):
+        return None
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT endpoint_id, organization_id, platform FROM device_credentials WHERE endpoint_id=? AND credential_hash=? AND revoked_at IS NULL",
+            (endpoint_id, credential_hash),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def rotate_device_credential(endpoint_id: str, old_hash: str, new_hash: str) -> Optional[Dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT organization_id, platform FROM device_credentials WHERE endpoint_id=? AND credential_hash=? AND revoked_at IS NULL",
+            (endpoint_id, old_hash),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("UPDATE device_credentials SET credential_hash=?, last_used_at=CURRENT_TIMESTAMP WHERE endpoint_id=?", (new_hash, endpoint_id))
+        return {"endpoint_id": endpoint_id, "organization_id": row["organization_id"], "platform": row["platform"]}
+
+
+def record_agent_batch(endpoint_id: str, organization_id: str, batch_id: str, event_count: int) -> bool:
+    """Return true only for the first successful receipt of a device batch."""
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO agent_ingest_batches(endpoint_id, batch_id, organization_id, event_count) VALUES (?, ?, ?, ?)",
+            (endpoint_id, batch_id, organization_id, event_count),
+        )
+        return cursor.rowcount == 1
+
+
+def record_agent_audit(organization_id: str, endpoint_id: Optional[str], event_type: str, detail: Dict[str, Any]) -> None:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.execute(
+            "INSERT INTO agent_audit_events(organization_id, endpoint_id, event_type, detail_json) VALUES (?, ?, ?, ?)",
+            (organization_id, endpoint_id, event_type, json.dumps(detail, allow_nan=False)),
+        )
 
 
 def revoke_device(endpoint_id: str) -> bool:

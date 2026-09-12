@@ -36,6 +36,7 @@ from .database import (
     get_active_cost_model,
     get_cost_models,
     get_endpoint,
+    get_authenticated_device,
     get_metrics,
     get_request_logs,
     get_remediation_action,
@@ -64,6 +65,9 @@ from .database import (
     resolve_incident,
     set_user_preference,
     revoke_device,
+    rotate_device_credential,
+    record_agent_batch,
+    record_agent_audit,
     store_telemetry_events,
     update_training_job,
     update_remediation_action,
@@ -399,6 +403,16 @@ class DeviceEnrollmentRequest(BaseModel):
     enrollment_token: str = Field(min_length=32, max_length=512)
     endpoint_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
     platform: Optional[str] = Field(default="Windows", max_length=64)
+
+
+class DeviceTelemetryBatchRequest(BaseModel):
+    batch_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
+    topology: str = Field(default="enterprise_20n")
+    events: List[TelemetryEventRequest] = Field(min_length=1, max_length=100)
+
+
+class DeviceCredentialRotateRequest(BaseModel):
+    reason: str = Field(default="administrator_requested", min_length=3, max_length=256)
 
 
 def _resolve_topology(topology_key: str) -> str:
@@ -1124,15 +1138,17 @@ def _credential_hash(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def _verify_device_auth(request: Request, endpoint_id: str) -> None:
+def _verify_device_auth(request: Request, endpoint_id: str) -> Dict[str, Any]:
     if (os.getenv("ONYX_ALLOW_LEGACY_SHARED_AGENT_KEY") or "").lower() in {
         "1", "true", "yes", "on"
     }:
         _verify_telemetry_ingest_auth(request)
-        return
+        return {"endpoint_id": endpoint_id, "organization_id": _organization_id(), "legacy": True}
     provided = _extract_api_key_from_request(request)
-    if not provided or not authenticate_device(endpoint_id, _credential_hash(provided)):
+    binding = get_authenticated_device(endpoint_id, _credential_hash(provided)) if provided else None
+    if not binding:
         raise HTTPException(status_code=401, detail="Unauthorized device request")
+    return binding
 
 
 def _verify_response_auth(request: Request) -> None:
@@ -1343,18 +1359,71 @@ def revoke_device_credential(endpoint_id: str, request: Request) -> dict:
 
 @app.post("/api/endpoints/heartbeat")
 def endpoint_heartbeat(payload: EndpointHeartbeatRequest, request: Request) -> dict:
-    _verify_device_auth(request, payload.endpoint_id)
+    binding = _verify_device_auth(request, payload.endpoint_id)
     _resolve_topology(payload.topology)
     if len(json.dumps(payload.metadata, allow_nan=False)) > 8192:
         raise HTTPException(status_code=422, detail="Endpoint metadata must be at most 8 KiB")
     previous = get_endpoint(payload.endpoint_id)
-    endpoint = upsert_endpoint_heartbeat(payload.model_dump())
+    heartbeat = payload.model_dump()
+    heartbeat["organization_id"] = binding["organization_id"]
+    endpoint = upsert_endpoint_heartbeat(heartbeat)
     for observation in payload.metadata.get("observed_connections", []):
         if isinstance(observation, dict) and observation.get("target"):
             upsert_relationship(payload.endpoint_id, str(observation["target"]), payload.topology, str(observation.get("type") or "observed_connection"), float(observation.get("confidence") or 0.6))
     if not previous:
         create_notification("endpoint_online", "info", f"Laptop connected: {payload.hostname}", "A live endpoint heartbeat was received.", endpoint_id=payload.endpoint_id)
     return {"endpoint": endpoint, "server_time": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/devices/{endpoint_id}/configuration")
+def get_device_configuration(endpoint_id: str, request: Request) -> dict:
+    binding = _verify_device_auth(request, endpoint_id)
+    platform = str(binding.get("platform") or "").lower()
+    collectors = ["windows_defender"] if "windows" in platform else ["apple_security_log"]
+    return {
+        "endpoint_id": endpoint_id,
+        "organization_id": binding["organization_id"],
+        "heartbeat_interval_seconds": 300,
+        "configuration_poll_seconds": 3600,
+        "event_batch_size": 100,
+        "queue_max_bytes": 10 * 1024 * 1024,
+        "queue_max_age_days": 7,
+        "enabled_collectors": collectors,
+        "minimum_agent_version": "1.0.0",
+        "response_controls_enabled": False,
+    }
+
+
+@app.post("/api/devices/{endpoint_id}/telemetry/batches")
+def ingest_device_telemetry_batch(endpoint_id: str, payload: DeviceTelemetryBatchRequest, request: Request) -> dict:
+    binding = _verify_device_auth(request, endpoint_id)
+    _resolve_topology(payload.topology)
+    raw_events = [event.model_dump() for event in payload.events]
+    if len(json.dumps(raw_events, allow_nan=False).encode("utf-8")) > 512 * 1024:
+        raise HTTPException(status_code=413, detail="Telemetry batch must be at most 512 KiB")
+    if not record_agent_batch(endpoint_id, binding["organization_id"], payload.batch_id, len(raw_events)):
+        return {"accepted": True, "duplicate": True, "inserted": 0, "batch_id": payload.batch_id}
+    for event in raw_events:
+        event["source_node"] = endpoint_id
+        event["raw"] = event.get("raw") or {}
+        event["raw"]["agent_endpoint_id"] = endpoint_id
+    normalized = normalize_events(raw_events, payload.topology)
+    inserted = store_telemetry_events(payload.topology, normalized, binding["organization_id"])
+    record_agent_audit(binding["organization_id"], endpoint_id, "telemetry_batch_received", {"batch_id": payload.batch_id, "events": len(raw_events), "inserted": inserted})
+    return {"accepted": True, "duplicate": False, "inserted": inserted, "batch_id": payload.batch_id}
+
+
+@app.post("/api/devices/{endpoint_id}/rotate-credential")
+def rotate_device_credential_route(endpoint_id: str, payload: DeviceCredentialRotateRequest, request: Request) -> dict:
+    provided = _extract_api_key_from_request(request)
+    if not provided:
+        raise HTTPException(status_code=401, detail="Unauthorized device request")
+    new_secret = secrets.token_urlsafe(48)
+    rotated = rotate_device_credential(endpoint_id, _credential_hash(provided), _credential_hash(new_secret))
+    if not rotated:
+        raise HTTPException(status_code=401, detail="Unauthorized device request")
+    record_agent_audit(rotated["organization_id"], endpoint_id, "credential_rotated", {"reason": payload.reason})
+    return {"endpoint_id": endpoint_id, "organization_id": rotated["organization_id"], "device_credential": new_secret}
 
 
 @app.get("/api/endpoints")

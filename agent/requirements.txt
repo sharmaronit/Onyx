@@ -1,0 +1,4 @@
+cryptography==50.0.1
+pyinstaller>=6.0,<7.0
+# Required only when building/running the Windows service executable.
+pywin32>=306; platform_system == "Windows"
