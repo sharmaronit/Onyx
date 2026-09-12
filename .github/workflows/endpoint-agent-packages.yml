@@ -85,6 +85,7 @@ jobs:
         with:
           tag_name: agent-v${{ inputs.version || '1.0.0' }}-dev
           name: Onyx Agent ${{ inputs.version || '1.0.0' }} development installers
-          prerelease: true
+          prerelease: false
+          make_latest: true
           generate_release_notes: false
           files: installers/**
