@@ -18,6 +18,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not [string]::IsNullOrWhiteSpace($PresetApiKey)) {
+    throw 'Refusing to embed a reusable API key in a downloadable bundle. Use authenticated per-device enrollment.'
+}
+
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $scriptRootResolved = Split-Path -Parent $MyInvocation.MyCommand.Path
     $OutputDir = Join-Path $scriptRootResolved 'dist'
@@ -74,7 +78,7 @@ foreach ($fileName in $requiredFiles) {
 $defaultsPath = Join-Path $bundleRoot 'installer_defaults.json'
 $defaults = [ordered]@{
     ingest_url = if ([string]::IsNullOrWhiteSpace($PresetIngestUrl)) { 'https://YOUR-SERVER-DOMAIN/api/telemetry/ingest' } else { $PresetIngestUrl }
-    api_key = $PresetApiKey
+    api_key = ''
     topology = $PresetTopology
     source = if ([string]::IsNullOrWhiteSpace($PresetSource)) { 'sysmon_forwarder' } else { $PresetSource }
     source_node = $PresetSourceNode
@@ -95,9 +99,10 @@ $quickStartText = @"
 Onyx Sysmon Client Bundle
 
 1) Extract this zip on the target laptop.
-2) Open installer_defaults.json and confirm ingest_url/api_key are correct.
-3) Right-click RUN_SETUP_AS_ADMIN.cmd and select "Run as administrator".
-4) Verify on server:
+2) Obtain a short-lived, one-use enrollment token from an Onyx administrator.
+3) Complete authenticated per-device provisioning before running privileged setup.
+4) Right-click RUN_SETUP_AS_ADMIN.cmd and select "Run as administrator" only after package verification.
+5) Verify on server:
    GET /api/telemetry/status?topology=enterprise_20n
 
 For full details, see SETUP_OTHER_LAPTOP.md.

@@ -5,6 +5,7 @@ Computes edge frequency heatmap and top-N most common paths to critical assets.
 
 from __future__ import annotations
 import json
+import os
 import random
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -52,7 +53,10 @@ def analyze_attack_paths(
 
     # Load agent if provided
     agent = None
-    if agent_path and Path(agent_path).exists():
+    trained_agent_enabled = (os.getenv("ONYX_ENABLE_TRAINED_AGENT") or "").lower() in {
+        "1", "true", "yes", "on"
+    }
+    if trained_agent_enabled and agent_path and Path(agent_path).exists():
         try:
             from sb3_contrib import MaskablePPO
             agent = MaskablePPO.load(agent_path)

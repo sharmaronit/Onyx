@@ -81,6 +81,7 @@ def evaluate_red_vs_blue(
     from src.graph.cve_tagger import load_cve_database, tag_graph
     from src.simulator.rule_based import AttackSimulator
     from src.envs.attacker_env import _build_obs, _build_action_mask, MAX_NODES
+    from src.envs.defender_env import decode_defender_action
 
     graph = load_topology(topology_path)
     cve_db = load_cve_database(cve_path)
@@ -130,16 +131,17 @@ def evaluate_red_vs_blue(
             def_action, _ = blue_model.predict(obs_def, action_masks=def_mask, deterministic=False)
             def_action = int(def_action)
             n = len(node_order)
-            if def_action < n:
-                nid = node_order[def_action]
+            try:
+                action_kind, action_index = decode_defender_action(def_action, n)
+                nid = node_order[action_index]
                 node = g.get_node(nid)
-                node.vulnerabilities = []
-                node.is_patched = True
-            elif def_action < 2 * n:
-                idx = def_action - n
-                if idx < n:
-                    nid = node_order[idx]
+                if action_kind == "patch":
+                    node.vulnerabilities = []
+                    node.is_patched = True
+                else:
                     g.get_node(nid).is_isolated = True
+            except ValueError:
+                pass
 
             step += 2
 

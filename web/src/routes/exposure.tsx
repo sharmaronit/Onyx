@@ -348,7 +348,7 @@ function Exposure() {
                       {p.cvss_score?.toFixed(1) ?? "—"}
                     </td>
                     <td className="px-5 py-3 text-right tabular">
-                      {p.simulation_impact ? (p.simulation_impact * 100).toFixed(1) + "%" : "—"}
+                      {p.effort_hours != null ? `${p.effort_hours}h` : "—"}
                     </td>
                   </tr>
                 ))}

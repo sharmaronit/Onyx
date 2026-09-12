@@ -147,9 +147,9 @@ function Patches() {
               tone="success"
             />
             <Metric
-              label="Estimated reduction"
-              value={`${Math.round(live.results.reduce((s: number, r: any) => s + r.simulation_impact, 0) * 100)}%`}
-              sub="prioritization estimate"
+              label="Highest priority"
+              value={`${Math.max(0, ...live.results.map((r: any) => r.priority_score))}/100`}
+              sub="non-additive estimate"
               tone="primary"
             />
             <Metric
@@ -169,7 +169,7 @@ function Patches() {
                     <th className="p-4">CVSS</th>
                     <th className="p-4">Fix</th>
                     <th className="p-4 text-right">Effort</th>
-                    <th className="p-4 text-right">ROI</th>
+                    <th className="p-4 text-right">Priority / hour</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -183,7 +183,7 @@ function Patches() {
                       <td className="p-4">{r.cvss_score.toFixed(1)}</td>
                       <td className="p-4">{r.fix_available ? "Available" : "Validate"}</td>
                       <td className="p-4 text-right">{r.effort_hours}h</td>
-                      <td className="p-4 text-right font-semibold">{r.roi_score}</td>
+                      <td className="p-4 text-right font-semibold">{r.priority_per_effort}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -199,8 +199,8 @@ function Patches() {
   const nodes = topology.data?.nodes || [];
   const nodeById = (id: string) => nodes.find((n: any) => n.node_id === id) || { node_id: id };
 
-  const totalReduction =
-    patches.reduce((a: number, p: any) => a + (p.simulation_impact || 0), 0) * 100;
+  const strongestSingleImpact =
+    Math.max(0, ...patches.map((p: any) => p.simulation_impact || 0)) * 100;
   const totalEffort = patches.reduce(
     (a: number, p: any) => a + (p.effort_hours || p.effort || 0),
     0,
@@ -212,9 +212,9 @@ function Patches() {
         <div className="grid gap-4 md:grid-cols-4">
           <Metric label="Recommended patches" value={String(patches.length)} sub="ranked by ROI" />
           <Metric
-            label="Cumulative risk reduction"
-            value={`-${totalReduction.toFixed(1)}%`}
-            sub="if all applied"
+            label="Top single-patch effect"
+            value={`-${strongestSingleImpact.toFixed(1)}%`}
+            sub="paired simulation estimate"
             tone="success"
           />
           <Metric

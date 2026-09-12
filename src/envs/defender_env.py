@@ -2,8 +2,8 @@
 defender_env.py — Single-agent Gymnasium environment for the Blue (defender) agent.
 
 Action space: Discrete(2 * MAX_NODES)
-  Actions 0..N-1:   patch node i   (remove all CVEs from that node)
-  Actions N..2N-1:  isolate node i (sever all edges to/from that node)
+  Actions 0..MAX_NODES-1:              patch node i
+  Actions MAX_NODES..2*MAX_NODES-1:    isolate node i
 
 Observation: same padded flat vector (MAX_NODES * 11,) as AttackerEnv —
   the defender observes the same graph state, including which nodes the
@@ -30,6 +30,31 @@ from src.envs.attacker_env import (
     MAX_NODES, NODE_FEAT_DIM,
     _build_obs, _build_action_mask
 )
+
+
+def encode_patch(node_index: int) -> int:
+    if not 0 <= node_index < MAX_NODES:
+        raise ValueError(f"Invalid patch node index {node_index}")
+    return node_index
+
+
+def encode_isolate(node_index: int) -> int:
+    if not 0 <= node_index < MAX_NODES:
+        raise ValueError(f"Invalid isolate node index {node_index}")
+    return MAX_NODES + node_index
+
+
+def decode_defender_action(action: int, n_real: int) -> Tuple[str, int]:
+    """Decode the shared padded defender action space.
+
+    Raises ``ValueError`` for padded or out-of-range actions so masks and
+    execution cannot silently disagree.
+    """
+    if 0 <= action < n_real:
+        return "patch", action
+    if MAX_NODES <= action < MAX_NODES + n_real:
+        return "isolate", action - MAX_NODES
+    raise ValueError(f"Invalid defender action {action} for {n_real} nodes")
 
 
 class DefenderEnv(gym.Env):
@@ -158,20 +183,20 @@ class DefenderEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _apply_defender_action(self, action: int):
-        """Apply patch (0..N-1) or isolate (N..2N-1)."""
-        if action < self._n_real:
+        """Apply a mask-compatible patch or isolation action."""
+        try:
+            action_kind, idx = decode_defender_action(int(action), self._n_real)
+        except ValueError:
+            return
+        nid = self._node_order[idx]
+        node = self._graph.get_node(nid)
+        if action_kind == "patch":
             # Patch: remove all vulnerabilities from node
-            nid = self._node_order[action]
-            node = self._graph.get_node(nid)
             node.vulnerabilities = []
             node.is_patched = True
-        elif action < 2 * self._n_real:
+        else:
             # Isolate: mark node as isolated (no edges traversed)
-            idx = action - self._n_real
-            if idx < self._n_real:
-                nid = self._node_order[idx]
-                node = self._graph.get_node(nid)
-                node.is_isolated = True
+            node.is_isolated = True
 
     def _defender_action_mask(self) -> np.ndarray:
         """
@@ -184,10 +209,10 @@ class DefenderEnv(gym.Env):
             node = self._graph.get_node(nid)
             # Patch valid
             if node.num_vulns > 0 and not node.is_patched:
-                mask[i] = True
+                mask[encode_patch(i)] = True
             # Isolate valid
             if not node.is_isolated:
-                mask[MAX_NODES + i] = True
+                mask[encode_isolate(i)] = True
         return mask
 
     def action_masks(self) -> np.ndarray:

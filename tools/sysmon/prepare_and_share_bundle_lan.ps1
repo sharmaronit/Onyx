@@ -19,6 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+throw 'This shared bundle workflow is disabled because it can expose reusable credentials. Use an authenticated package channel and per-device enrollment.'
+
 function Write-Stage {
     param([string]$Message)
     Write-Host "[Onyx LAN Prep] $Message"

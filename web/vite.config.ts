@@ -6,7 +6,7 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-const backendUrl = process.env.ONYX_BACKEND_URL ?? "http://127.0.0.1:8020";
+const backendUrl = process.env["ONYX_BACKEND_URL"] ?? "http://127.0.0.1:8020";
 
 export default defineConfig({
   vite: {

@@ -2,6 +2,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as api from "../lib/api";
 import { useAppMode } from "../lib/app-mode";
 
+export function useCapabilities() {
+  return useQuery({
+    queryKey: ["capabilities"],
+    queryFn: api.fetchCapabilities,
+    staleTime: 30000,
+  });
+}
+
 export function useTopologies() {
   return useQuery({
     queryKey: ["topologies"],

@@ -149,6 +149,8 @@ def init_db() -> None:
         error_message TEXT,
         requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         delivered_at TIMESTAMP,
+        lease_expires_at TIMESTAMP,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
         completed_at TIMESTAMP,
         FOREIGN KEY(endpoint_id) REFERENCES endpoint_agents(endpoint_id)
     )"""
@@ -258,6 +260,55 @@ def init_db() -> None:
         last_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(source_asset, target_asset, topology, relation_type)
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS remediation_actions (
+        action_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT 'default',
+        finding_id TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        due_date TEXT,
+        priority TEXT NOT NULL DEFAULT 'medium',
+        state TEXT NOT NULL DEFAULT 'proposed',
+        verification_json TEXT,
+        exception_json TEXT,
+        created_by TEXT NOT NULL,
+        updated_by TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS remediation_actions_queue ON remediation_actions(organization_id, state, due_date)")
+    c.execute("""CREATE TABLE IF NOT EXISTS device_enrollment_tokens (
+        token_hash TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        allowed_platform TEXT,
+        expires_at TEXT NOT NULL,
+        max_uses INTEGER NOT NULL DEFAULT 1,
+        use_count INTEGER NOT NULL DEFAULT 0,
+        revoked_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS device_credentials (
+        endpoint_id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        credential_hash TEXT UNIQUE NOT NULL,
+        platform TEXT,
+        revoked_at TIMESTAMP,
+        last_used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # Additive migrations for databases created by earlier Onyx versions.
+    response_columns = {
+        row[1] for row in c.execute("PRAGMA table_info(response_commands)").fetchall()
+    }
+    if "lease_expires_at" not in response_columns:
+        c.execute("ALTER TABLE response_commands ADD COLUMN lease_expires_at TIMESTAMP")
+    if "attempt_count" not in response_columns:
+        c.execute(
+            "ALTER TABLE response_commands ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
+        )
 
     conn.commit()
     conn.close()
@@ -618,14 +669,19 @@ def create_response_command(
     return get_response_command(command_id) or {}
 
 
-def claim_pending_commands(endpoint_id: str) -> List[Dict[str, Any]]:
+def claim_pending_commands(endpoint_id: str, lease_seconds: int = 60) -> List[Dict[str, Any]]:
     init_db()
+    safe_lease_seconds = max(10, min(int(lease_seconds), 3600))
+    lease_modifier = f"+{safe_lease_seconds} seconds"
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             """SELECT * FROM response_commands
-            WHERE endpoint_id = ? AND status = 'pending'
+            WHERE endpoint_id = ? AND (
+                status = 'pending' OR
+                (status = 'delivered' AND lease_expires_at <= CURRENT_TIMESTAMP)
+            )
             ORDER BY requested_at LIMIT 10""",
             (endpoint_id,),
         ).fetchall()
@@ -633,10 +689,18 @@ def claim_pending_commands(endpoint_id: str) -> List[Dict[str, Any]]:
         if command_ids:
             conn.executemany(
                 """UPDATE response_commands SET status='delivered',
-                delivered_at=CURRENT_TIMESTAMP WHERE command_id=? AND status='pending'""",
-                [(command_id,) for command_id in command_ids],
+                delivered_at=CURRENT_TIMESTAMP,
+                lease_expires_at=datetime('now', ?),
+                attempt_count=attempt_count + 1
+                WHERE command_id=? AND status IN ('pending', 'delivered')""",
+                [(lease_modifier, command_id) for command_id in command_ids],
             )
-    return [_command_row(row, status_override="delivered") for row in rows]
+            placeholders = ",".join("?" for _ in command_ids)
+            rows = conn.execute(
+                f"SELECT * FROM response_commands WHERE command_id IN ({placeholders})",
+                command_ids,
+            ).fetchall()
+    return [_command_row(row) for row in rows]
 
 
 def complete_response_command(
@@ -649,9 +713,19 @@ def complete_response_command(
 ) -> Optional[Dict[str, Any]]:
     init_db()
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        existing = conn.execute(
+            "SELECT * FROM response_commands WHERE command_id=? AND endpoint_id=?",
+            (command_id, endpoint_id),
+        ).fetchone()
+        if not existing:
+            return None
+        if existing["status"] in ("succeeded", "failed"):
+            # Endpoint retries are expected when an acknowledgement response is lost.
+            return _command_row(existing)
         cursor = conn.execute(
             """UPDATE response_commands SET status=?, result_json=?, error_message=?,
-            completed_at=CURRENT_TIMESTAMP
+            completed_at=CURRENT_TIMESTAMP, lease_expires_at=NULL
             WHERE command_id=? AND endpoint_id=? AND status='delivered'""",
             (status, json.dumps(result), error_message, command_id, endpoint_id),
         )
@@ -707,8 +781,168 @@ def _command_row(row: sqlite3.Row, status_override: Optional[str] = None) -> Dic
         "error_message": row["error_message"],
         "requested_at": row["requested_at"],
         "delivered_at": row["delivered_at"],
+        "lease_expires_at": row["lease_expires_at"],
+        "attempt_count": row["attempt_count"],
         "completed_at": row["completed_at"],
     }
+
+
+def create_remediation_action(action: Dict[str, Any]) -> Dict[str, Any]:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.execute(
+            """INSERT INTO remediation_actions
+            (action_id, organization_id, finding_id, endpoint_id, title,
+             recommendation, owner, due_date, priority, state, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                action["action_id"], action.get("organization_id", "default"),
+                action["finding_id"], action["endpoint_id"], action["title"],
+                action["recommendation"], action["owner"], action.get("due_date"),
+                action.get("priority", "medium"), action.get("state", "proposed"),
+                action["actor"], action["actor"],
+            ),
+        )
+    return get_remediation_action(action["action_id"]) or {}
+
+
+def get_remediation_action(action_id: str) -> Optional[Dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM remediation_actions WHERE action_id=?", (action_id,)
+        ).fetchone()
+    return _remediation_row(row) if row else None
+
+
+def list_remediation_actions(
+    organization_id: str = "default", state: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        if state:
+            rows = conn.execute(
+                """SELECT * FROM remediation_actions
+                WHERE organization_id=? AND state=?
+                ORDER BY due_date IS NULL, due_date, created_at DESC""",
+                (organization_id, state),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM remediation_actions WHERE organization_id=?
+                ORDER BY due_date IS NULL, due_date, created_at DESC""",
+                (organization_id,),
+            ).fetchall()
+    return [_remediation_row(row) for row in rows]
+
+
+def update_remediation_action(
+    action_id: str,
+    state: str,
+    actor: str,
+    owner: Optional[str] = None,
+    due_date: Optional[str] = None,
+    verification: Optional[Dict[str, Any]] = None,
+    exception: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        cursor = conn.execute(
+            """UPDATE remediation_actions SET state=?, updated_by=?,
+            owner=COALESCE(?, owner), due_date=COALESCE(?, due_date),
+            verification_json=COALESCE(?, verification_json),
+            exception_json=COALESCE(?, exception_json),
+            updated_at=CURRENT_TIMESTAMP WHERE action_id=?""",
+            (
+                state, actor, owner, due_date,
+                json.dumps(verification) if verification is not None else None,
+                json.dumps(exception) if exception is not None else None,
+                action_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            return None
+    return get_remediation_action(action_id)
+
+
+def _remediation_row(row: sqlite3.Row) -> Dict[str, Any]:
+    result = dict(row)
+    result["verification"] = json.loads(result.pop("verification_json") or "{}")
+    result["exception"] = json.loads(result.pop("exception_json") or "{}")
+    return result
+
+
+def save_enrollment_token(
+    token_hash: str, organization_id: str, allowed_platform: Optional[str],
+    expires_at: str, max_uses: int = 1,
+) -> None:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.execute(
+            """INSERT INTO device_enrollment_tokens
+            (token_hash, organization_id, allowed_platform, expires_at, max_uses)
+            VALUES (?, ?, ?, ?, ?)""",
+            (token_hash, organization_id, allowed_platform, expires_at, max_uses),
+        )
+
+
+def consume_enrollment_token(
+    token_hash: str, endpoint_id: str, platform: Optional[str], credential_hash: str,
+) -> Optional[Dict[str, Any]]:
+    init_db()
+    now = datetime.utcnow().isoformat()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        token = conn.execute(
+            """SELECT * FROM device_enrollment_tokens WHERE token_hash=?
+            AND revoked_at IS NULL AND expires_at > ? AND use_count < max_uses""",
+            (token_hash, now),
+        ).fetchone()
+        if not token:
+            return None
+        allowed = (token["allowed_platform"] or "").lower()
+        if allowed and allowed != (platform or "").lower():
+            return None
+        if conn.execute(
+            "SELECT 1 FROM device_credentials WHERE endpoint_id=?", (endpoint_id,)
+        ).fetchone():
+            return None
+        conn.execute(
+            """INSERT INTO device_credentials
+            (endpoint_id, organization_id, credential_hash, platform)
+            VALUES (?, ?, ?, ?)""",
+            (endpoint_id, token["organization_id"], credential_hash, platform),
+        )
+        conn.execute(
+            "UPDATE device_enrollment_tokens SET use_count=use_count+1 WHERE token_hash=?",
+            (token_hash,),
+        )
+        return {"endpoint_id": endpoint_id, "organization_id": token["organization_id"]}
+
+
+def authenticate_device(endpoint_id: str, credential_hash: str) -> bool:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        cursor = conn.execute(
+            """UPDATE device_credentials SET last_used_at=CURRENT_TIMESTAMP
+            WHERE endpoint_id=? AND credential_hash=? AND revoked_at IS NULL""",
+            (endpoint_id, credential_hash),
+        )
+        return cursor.rowcount == 1
+
+
+def revoke_device(endpoint_id: str) -> bool:
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        cursor = conn.execute(
+            """UPDATE device_credentials SET revoked_at=CURRENT_TIMESTAMP
+            WHERE endpoint_id=? AND revoked_at IS NULL""",
+            (endpoint_id,),
+        )
+        return cursor.rowcount == 1
 
 
 # ============ User Preferences ============

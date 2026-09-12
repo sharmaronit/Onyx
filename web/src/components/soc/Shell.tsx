@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell,
   Moon,
@@ -133,7 +133,10 @@ function NotificationsBell() {
       setOpen(false);
     },
   });
-  const rows = notifications.data?.notifications ?? [];
+  const rows = useMemo(
+    () => notifications.data?.notifications ?? [],
+    [notifications.data?.notifications],
+  );
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -392,7 +395,9 @@ export function Shell({ children }: { children: ReactNode }) {
                   >
                     <Icon className="mt-0.5 h-4 w-4 text-primary" strokeWidth={1.8} />
                     <span>
-                      <span className="onyx-nav-label block text-[12px] font-semibold">{item.label}</span>
+                      <span className="onyx-nav-label block text-[12px] font-semibold">
+                        {item.label}
+                      </span>
                       <span className="block text-[11px] font-medium text-muted-foreground">
                         {item.hint}
                       </span>

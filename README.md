@@ -41,7 +41,7 @@ Simulation runs against a frozen graph and does not send packets or endpoint com
 
 Reality-mode findings require evidence from enrolled endpoints, observed relationships, and imported vulnerability data. A prioritization estimate is an estimate. Keep existing endpoint protection and device-management platforms in place while evaluating Onyx.
 
-Endpoint response tooling is experimental. Use it only on infrastructure you own or are explicitly authorized to administer, and test disruptive controls in a lab before production use.
+Endpoint response tooling is disabled by default and excluded from the read-only pilot. The backend rejects these actions unless `ONYX_RESPONSE_CONTROLS_ENABLED=true` and a response key are both configured for a controlled lab.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ The research path adds a Graph Neural Network world model and reinforcement-lear
 | `web/` | React/TanStack console and FastAPI backend |
 | `demo/` | Streamlit research/demo application |
 | `data/topologies/` | Small sanitized example topologies |
-| `data/cve/` | Example vulnerability fixtures; validate production identifiers |
+| `data/cve/` | Explicitly synthetic `SYNTH-ONYX-*` training fixtures |
 | `configs/` | Simulation, graph, telemetry, and cost configuration |
 | `tests/` | Focused regression and API tests |
 | `tools/` | Endpoint collectors, evidence tooling, and lab utilities |
@@ -134,10 +134,11 @@ Do not run training as part of a customer deployment. Trained artifacts are not 
 ## Verification
 
 ```powershell
-python -B -m unittest tests.test_attack_path_regression -v
-python -B -m unittest tests.test_endpoint_response_api -v
-npm --prefix web run lint
-npm --prefix web run build
+.\.runtime-python310\python.exe -B -m unittest tests.test_simulation_correctness tests.test_endpoint_response_api tests.test_device_enrollment_api tests.test_remediation_api tests.test_api_simulate_regression tests.test_attack_path_regression -v
+cd web
+.\node_modules\.bin\tsc.cmd --noEmit
+npm.cmd run lint
+npm.cmd run build
 ```
 
 Known issues and validation limits are documented in [ONYX_BUSINESS_AND_TECHNICAL_REVIEW.md](ONYX_BUSINESS_AND_TECHNICAL_REVIEW.md). Passing a route test does not establish tenant isolation, endpoint containment, model validity, or production readiness.
@@ -160,6 +161,10 @@ Before distributing an endpoint agent or exposing the API to the internet, imple
 ## Documents
 
 - [Business and technical review](ONYX_BUSINESS_AND_TECHNICAL_REVIEW.md)
+- [Remediation implementation plan](ONYX_REMEDIATION_PLAN.md)
+- [Supported capabilities](SUPPORTED_CAPABILITIES.md)
+- [Paid-pilot scope](PILOT_SCOPE.md)
+- [Pilot configuration](docs/PILOT_CONFIGURATION.md)
 - [Real-data integration TODO](docs/REAL_DATA_INTEGRATION_TODO.md)
 - [Simulation credibility plan](docs/SIMULATION_CREDIBILITY_PLAN.md)
 - [Telemetry schema](docs/TELEMETRY_SCHEMA.md)

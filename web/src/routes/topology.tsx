@@ -34,8 +34,71 @@ function Topology() {
   if (mode === "reality") {
     const nodes = reality.data?.nodes ?? [];
     const edges = reality.data?.edges ?? [];
-    const affected = nodes.filter((node: any) => ["compromised", "affected"].includes(node.security_state)).map((node: any) => node.node_id);
-    return <Shell><div className="space-y-6"><div><p className="eyebrow">Verified asset graph</p><h2 className="mt-1 font-display text-2xl font-semibold">Live discovered topology</h2><p className="mt-2 text-sm text-muted-foreground">Nodes and connections update in place from endpoint evidence; the page does not reload.</p></div>{reality.isLoading ? <div className="p-8">Loading live topology...</div> : reality.error ? <Panel title="Reality topology unavailable"><p className="p-5 text-sm text-destructive">{reality.error.message}. Restart the backend on port 8020.</p></Panel> : nodes.length <= 1 ? <Panel title="No verified assets yet"><p className="p-5 text-sm text-muted-foreground">Enroll a Windows endpoint agent to start building this map. Static demo nodes are intentionally hidden in Reality mode.</p></Panel> : <><div className="grid gap-4 md:grid-cols-3"><Metric label="Verified assets" value={String(Math.max(0, nodes.length - 1))} sub="agents and discovered peers"/><Metric label="Observed connections" value={String(edges.length)} sub="telemetry-backed only"/><Metric label="Affected assets" value={String(affected.length)} sub="open incidents" tone={affected.length ? "destructive" : "success"}/></div><Panel title="Observed relationships"><MiniMap nodes={nodes} edges={edges} compromised={affected} active={selected ?? undefined} onSelect={setSelected} height={560} layout="circular"/></Panel></>}</div></Shell>;
+    const affected = nodes
+      .filter((node: any) => ["compromised", "affected"].includes(node.security_state))
+      .map((node: any) => node.node_id);
+    return (
+      <Shell>
+        <div className="space-y-6">
+          <div>
+            <p className="eyebrow">Verified asset graph</p>
+            <h2 className="mt-1 font-display text-2xl font-semibold">Live discovered topology</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Nodes and connections update in place from endpoint evidence; the page does not
+              reload.
+            </p>
+          </div>
+          {reality.isLoading ? (
+            <div className="p-8">Loading live topology...</div>
+          ) : reality.error ? (
+            <Panel title="Reality topology unavailable">
+              <p className="p-5 text-sm text-destructive">
+                {reality.error.message}. Restart the backend on port 8020.
+              </p>
+            </Panel>
+          ) : nodes.length <= 1 ? (
+            <Panel title="No verified assets yet">
+              <p className="p-5 text-sm text-muted-foreground">
+                Enroll a Windows endpoint agent to start building this map. Static demo nodes are
+                intentionally hidden in Reality mode.
+              </p>
+            </Panel>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Metric
+                  label="Verified assets"
+                  value={String(Math.max(0, nodes.length - 1))}
+                  sub="agents and discovered peers"
+                />
+                <Metric
+                  label="Observed connections"
+                  value={String(edges.length)}
+                  sub="telemetry-backed only"
+                />
+                <Metric
+                  label="Affected assets"
+                  value={String(affected.length)}
+                  sub="open incidents"
+                  tone={affected.length ? "destructive" : "success"}
+                />
+              </div>
+              <Panel title="Observed relationships">
+                <MiniMap
+                  nodes={nodes}
+                  edges={edges}
+                  compromised={affected}
+                  active={selected ?? undefined}
+                  onSelect={setSelected}
+                  height={560}
+                  layout="circular"
+                />
+              </Panel>
+            </>
+          )}
+        </div>
+      </Shell>
+    );
   }
 
   if (topology.isLoading) {
@@ -67,7 +130,7 @@ function Topology() {
     },
     ...liveEndpoints
       .filter((endpoint) => !topologyNodes.some((node) => node.node_id === endpoint.endpoint_id))
-      .map((endpoint) => ({
+      .map((endpoint): MapNode => ({
         node_id: endpoint.endpoint_id,
         node_type: "endpoint laptop",
         software: endpoint.platform || "Endpoint heartbeat agent",
@@ -78,15 +141,19 @@ function Topology() {
         is_critical_asset: false,
         is_entry_point: false,
         hostname: endpoint.hostname,
-        ip_address: endpoint.ip_address,
+        ip_address: endpoint.ip_address ?? null,
         endpoint_status: endpoint.quarantined ? "quarantined" : endpoint.status,
-        security_state: endpoint.security_state,
+        security_state: endpoint.security_state ?? "healthy",
       })),
   ];
   const edges: MapEdge[] = [
     ...topologyEdges,
     ...liveEndpoints
-      .filter((endpoint) => nodes.some((node) => node.node_id === endpoint.endpoint_id) && !endpoint.server_link_disconnected)
+      .filter(
+        (endpoint) =>
+          nodes.some((node) => node.node_id === endpoint.endpoint_id) &&
+          !endpoint.server_link_disconnected,
+      )
       .map((endpoint) => ({
         source: endpoint.endpoint_id,
         target: serverNodeId,
@@ -142,7 +209,11 @@ function Topology() {
             <MiniMap
               nodes={nodes}
               edges={edges}
-              compromised={liveEndpoints.filter((endpoint) => ["compromised", "affected"].includes(endpoint.security_state)).map((endpoint) => endpoint.endpoint_id)}
+              compromised={liveEndpoints
+                .filter((endpoint) =>
+                  ["compromised", "affected"].includes(endpoint.security_state ?? ""),
+                )
+                .map((endpoint) => endpoint.endpoint_id)}
               active={activeNodeId}
               onSelect={setSelected}
               height={480}
@@ -163,10 +234,17 @@ function Topology() {
                 )}
               </div>
               <dl className="space-y-2.5 text-[13px]">
-                {selectedEndpoint?.latest_incident && <div className="rounded border border-destructive bg-destructive/5 p-2 text-[12px] text-destructive">
-                  <p className="font-semibold">Affected · {selectedEndpoint.latest_incident.source === "simulated" ? "Safe simulated detection" : "Microsoft Defender"}</p>
-                  <p>{selectedEndpoint.latest_incident.summary}</p>
-                </div>}
+                {selectedEndpoint?.latest_incident && (
+                  <div className="rounded border border-destructive bg-destructive/5 p-2 text-[12px] text-destructive">
+                    <p className="font-semibold">
+                      Affected ·{" "}
+                      {selectedEndpoint.latest_incident.source === "simulated"
+                        ? "Safe simulated detection"
+                        : "Microsoft Defender"}
+                    </p>
+                    <p>{selectedEndpoint.latest_incident.summary}</p>
+                  </div>
+                )}
                 <div className="flex justify-between border-b border-hairline pb-2">
                   <dt className="text-muted-foreground">Vulnerabilities</dt>
                   <dd>

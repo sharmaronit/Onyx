@@ -22,6 +22,8 @@ class EndpointResponseApiTests(unittest.TestCase):
             {
                 "ONYX_TELEMETRY_INGEST_API_KEY": "agent-test-key",
                 "ONYX_RESPONSE_API_KEY": "response-test-key",
+                "ONYX_RESPONSE_CONTROLS_ENABLED": "true",
+                "ONYX_ALLOW_LEGACY_SHARED_AGENT_KEY": "true",
             },
         )
         self.db_patch.start()
@@ -49,6 +51,7 @@ class EndpointResponseApiTests(unittest.TestCase):
                 "agent_version": "2.0.0",
                 "platform": "Windows",
                 "quarantined": False,
+                "metadata": {"response_capable": True},
             },
         )
         self.assertEqual(heartbeat.status_code, 200)
@@ -118,6 +121,7 @@ class EndpointResponseApiTests(unittest.TestCase):
         self.assertTrue(endpoint["quarantined"])
         self.assertEqual(endpoint["threat_count"], 1)
         self.assertEqual(endpoint["latest_command"]["status"], "succeeded")
+        self.assertEqual(endpoint["open_incident_count"], 1)
 
     def test_sensitive_routes_fail_closed(self):
         unauthorized_heartbeat = self.client.post(
@@ -130,6 +134,53 @@ class EndpointResponseApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(unauthorized_heartbeat.status_code, 401)
+
+    def test_response_controls_are_disabled_by_default(self):
+        with patch.dict(os.environ, {"ONYX_RESPONSE_CONTROLS_ENABLED": "false"}):
+            response = self.client.post(
+                "/api/endpoints/unknown/commands?mode=demo",
+                json={
+                    "action": "quarantine",
+                    "reason": "test safe default",
+                    "requested_by": "security_architect",
+                },
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_expired_command_lease_is_reclaimed_and_ack_is_idempotent(self):
+        agent_headers = {"Authorization": "Bearer agent-test-key"}
+        self.client.post(
+            "/api/endpoints/heartbeat",
+            headers=agent_headers,
+            json={
+                "endpoint_id": "lease-laptop",
+                "hostname": "LEASE-LAPTOP",
+                "topology": "enterprise_20n",
+                "agent_version": "2.0.0",
+            },
+        )
+        created = database.create_response_command(
+            "cmd-lease", "lease-laptop", "quarantine", "lease test", "test", {}
+        )
+        self.assertEqual(created["status"], "pending")
+        first = database.claim_pending_commands("lease-laptop", lease_seconds=10)
+        self.assertEqual(first[0]["attempt_count"], 1)
+        self.assertEqual(database.claim_pending_commands("lease-laptop"), [])
+        with database.sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE response_commands SET lease_expires_at=datetime('now', '-1 second') "
+                "WHERE command_id='cmd-lease'"
+            )
+        second = database.claim_pending_commands("lease-laptop")
+        self.assertEqual(second[0]["attempt_count"], 2)
+        completed = database.complete_response_command(
+            "cmd-lease", "lease-laptop", "succeeded", {"ok": True}, None, True
+        )
+        retried = database.complete_response_command(
+            "cmd-lease", "lease-laptop", "succeeded", {"ok": True}, None, True
+        )
+        self.assertEqual(completed["status"], "succeeded")
+        self.assertEqual(retried["status"], "succeeded")
 
 
 if __name__ == "__main__":

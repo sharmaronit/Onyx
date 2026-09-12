@@ -2,36 +2,43 @@ from __future__ import annotations
 
 import hmac
 import hashlib
+import csv
+import io
 import json
 import logging
 import os
 import subprocess
 import statistics
 import sys
+import secrets
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .database import (
     claim_pending_commands,
+    authenticate_device,
+    consume_enrollment_token,
     clear_notifications,
     complete_response_command,
     create_incident,
     create_notification,
     create_response_command,
+    create_remediation_action,
     create_training_job,
     get_active_cost_model,
     get_cost_models,
     get_endpoint,
     get_metrics,
     get_request_logs,
+    get_remediation_action,
     get_scenario_history,
     get_simulation_run,
     list_vulnerability_findings,
@@ -45,17 +52,21 @@ from .database import (
     list_relationships,
     list_open_incidents,
     list_response_commands,
+    list_remediation_actions,
     log_request,
     log_scenario_execution,
     save_cost_model,
+    save_enrollment_token,
     save_simulation_run,
     set_server_link,
     server_link_disconnected,
     mark_notifications_read,
     resolve_incident,
     set_user_preference,
+    revoke_device,
     store_telemetry_events,
     update_training_job,
+    update_remediation_action,
     upsert_endpoint_heartbeat,
     upsert_relationship,
     upsert_vulnerability_findings,
@@ -152,6 +163,21 @@ cache: Dict[str, Any] = {
     "last_replay_by_mode": {},
     "patch_results_by_mode": {},
 }
+
+
+def _scoped_cache_key(mode: str, topology: str) -> str:
+    """Keep demo/reality and topology inputs from sharing mutable cache entries."""
+    return f"{mode}:{topology}"
+
+
+def _invalidate_reality_cache(topology: str) -> None:
+    cache["sim_results"] = None
+    cache["patch_results"] = None
+    cache["last_replay"] = None
+    scoped_key = _scoped_cache_key("reality", topology)
+    cache["sim_results_by_mode"].pop(scoped_key, None)
+    cache["patch_results_by_mode"].pop(scoped_key, None)
+    cache["last_replay_by_mode"].pop(scoped_key, None)
 
 
 class SimulationRequest(BaseModel):
@@ -338,6 +364,41 @@ class ServerLinkRequest(BaseModel):
 class CostModelUpdateRequest(BaseModel):
     node_type_effort_hours: Dict[str, float]
     critical_asset_multiplier: float = Field(ge=0.1, le=10.0)
+
+
+REMEDIATION_STATES = Literal[
+    "proposed", "accepted", "in_progress", "contained", "awaiting_verification",
+    "verified", "exception", "closed", "reopened",
+]
+
+
+class RemediationActionCreateRequest(BaseModel):
+    finding_id: str = Field(min_length=1, max_length=255)
+    endpoint_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    owner: str = Field(min_length=1, max_length=255)
+    due_date: Optional[str] = None
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
+
+
+class RemediationActionUpdateRequest(BaseModel):
+    state: REMEDIATION_STATES
+    owner: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    due_date: Optional[str] = None
+    verification: Optional[Dict[str, Any]] = None
+    exception: Optional[Dict[str, Any]] = None
+
+
+class EnrollmentTokenRequest(BaseModel):
+    allowed_platform: Optional[str] = Field(default="Windows", max_length=64)
+    expires_in_minutes: int = Field(default=15, ge=1, le=1440)
+
+
+class DeviceEnrollmentRequest(BaseModel):
+    enrollment_token: str = Field(min_length=32, max_length=512)
+    endpoint_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
+    platform: Optional[str] = Field(default="Windows", max_length=64)
 
 
 def _resolve_topology(topology_key: str) -> str:
@@ -1025,15 +1086,59 @@ def _verify_telemetry_ingest_auth(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized telemetry ingest request")
 
 
+def _response_controls_enabled() -> bool:
+    return (os.getenv("ONYX_RESPONSE_CONTROLS_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _require_response_controls() -> None:
+    if not _response_controls_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Endpoint response controls are disabled. Set "
+                "ONYX_RESPONSE_CONTROLS_ENABLED=true after completing a controlled rollout."
+            ),
+        )
+
+
+def _organization_id() -> str:
+    return (os.getenv("ONYX_ORGANIZATION_ID") or "default").strip() or "default"
+
+
+def _verify_admin_auth(request: Request) -> str:
+    expected_api_key = (os.getenv("ONYX_ADMIN_API_KEY") or "").strip()
+    if not expected_api_key:
+        raise HTTPException(status_code=503, detail="Administrator authentication is not configured")
+    provided_api_key = _extract_api_key_from_request(request)
+    if not provided_api_key or not hmac.compare_digest(provided_api_key, expected_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized administrator request")
+    return (os.getenv("ONYX_ADMIN_ACTOR") or "pilot-administrator").strip()
+
+
+def _credential_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def _verify_device_auth(request: Request, endpoint_id: str) -> None:
+    if (os.getenv("ONYX_ALLOW_LEGACY_SHARED_AGENT_KEY") or "").lower() in {
+        "1", "true", "yes", "on"
+    }:
+        _verify_telemetry_ingest_auth(request)
+        return
+    provided = _extract_api_key_from_request(request)
+    if not provided or not authenticate_device(endpoint_id, _credential_hash(provided)):
+        raise HTTPException(status_code=401, detail="Unauthorized device request")
+
+
 def _verify_response_auth(request: Request) -> None:
+    _require_response_controls()
     expected_api_key = (os.getenv("ONYX_RESPONSE_API_KEY") or "").strip()
     if not expected_api_key:
-        # Appliance-only development/operational console: allow the local UI to
-        # perform audited response actions when a response key has not yet been
-        # provisioned. Remote callers must always provision a key.
-        client_host = (request.client.host if request.client else "")
-        if client_host in {"127.0.0.1", "::1", "localhost"}:
-            return
         raise HTTPException(status_code=503, detail="Response authorization is not configured")
     provided_api_key = _extract_api_key_from_request(request)
     if not provided_api_key or not hmac.compare_digest(provided_api_key, expected_api_key):
@@ -1199,9 +1304,46 @@ def _demo_simulation(topology_key: str, n_episodes: int) -> dict:
     }
 
 
+@app.post("/api/device-enrollment/tokens")
+def create_device_enrollment_token(payload: EnrollmentTokenRequest, request: Request) -> dict:
+    _verify_admin_auth(request)
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(minutes=payload.expires_in_minutes)
+    save_enrollment_token(
+        _credential_hash(raw_token), _organization_id(), payload.allowed_platform,
+        expires_at.isoformat(), 1,
+    )
+    return {
+        "enrollment_token": raw_token,
+        "organization_id": _organization_id(),
+        "expires_at": expires_at.replace(tzinfo=timezone.utc).isoformat(),
+        "max_uses": 1,
+    }
+
+
+@app.post("/api/device-enrollment/exchange")
+def exchange_device_enrollment(payload: DeviceEnrollmentRequest) -> dict:
+    device_secret = secrets.token_urlsafe(48)
+    enrolled = consume_enrollment_token(
+        _credential_hash(payload.enrollment_token), payload.endpoint_id, payload.platform,
+        _credential_hash(device_secret),
+    )
+    if not enrolled:
+        raise HTTPException(status_code=401, detail="Enrollment token is invalid, expired, used, or incompatible")
+    return {**enrolled, "device_credential": device_secret}
+
+
+@app.post("/api/devices/{endpoint_id}/revoke")
+def revoke_device_credential(endpoint_id: str, request: Request) -> dict:
+    _verify_admin_auth(request)
+    if not revoke_device(endpoint_id):
+        raise HTTPException(status_code=404, detail="Active device credential not found")
+    return {"endpoint_id": endpoint_id, "revoked": True}
+
+
 @app.post("/api/endpoints/heartbeat")
 def endpoint_heartbeat(payload: EndpointHeartbeatRequest, request: Request) -> dict:
-    _verify_telemetry_ingest_auth(request)
+    _verify_device_auth(request, payload.endpoint_id)
     _resolve_topology(payload.topology)
     if len(json.dumps(payload.metadata, allow_nan=False)) > 8192:
         raise HTTPException(status_code=422, detail="Endpoint metadata must be at most 8 KiB")
@@ -1244,7 +1386,15 @@ def endpoints(
     for endpoint in endpoint_rows:
         seen_at = _parse_iso_timestamp(endpoint.get("last_seen_at"))
         age_seconds = (now - seen_at).total_seconds() if seen_at else None
-        endpoint["status"] = "active" if age_seconds is not None and age_seconds <= 30 else "offline"
+        freshness_seconds = max(30, int(os.getenv("ONYX_HEARTBEAT_FRESH_SECONDS") or "300"))
+        stale_seconds = max(freshness_seconds, int(os.getenv("ONYX_HEARTBEAT_STALE_SECONDS") or "86400"))
+        endpoint["status"] = "active" if age_seconds is not None and age_seconds <= freshness_seconds else "offline"
+        endpoint["evidence_state"] = (
+            "unknown" if age_seconds is None else
+            "fresh" if age_seconds <= freshness_seconds else
+            "stale" if age_seconds <= stale_seconds else
+            "offline"
+        )
         endpoint["seconds_since_last_seen"] = round(max(0.0, age_seconds), 1) if age_seconds is not None else None
         endpoint["event_count"] = event_counts.get(endpoint["endpoint_id"], 0)
         endpoint["threat_count"] = threat_counts.get(endpoint["endpoint_id"], 0)
@@ -1294,6 +1444,11 @@ def reality_overview(topology: str = Query(default="enterprise_20n")) -> dict:
     affected = [row for row in rows if row.get("security_state") in ("warning", "compromised", "critical")]
     relationships = list_relationships(topology)
     findings = list_vulnerability_findings(topology)
+    expected = max(0, int(os.getenv("ONYX_EXPECTED_DEVICE_COUNT") or "0"))
+    denominator = expected or len(rows)
+    stale = [row for row in rows if row.get("evidence_state") == "stale"]
+    offline = [row for row in rows if row.get("evidence_state") == "offline"]
+    unknown = [row for row in rows if row.get("evidence_state") == "unknown"]
     latest = max((str(event.get("timestamp") or "") for event in events), default=None)
     readiness = {
         "endpoints": len(rows) > 0,
@@ -1301,9 +1456,12 @@ def reality_overview(topology: str = Query(default="enterprise_20n")) -> dict:
         "relationships": len(relationships) > 0,
         "vulnerability_inventory": len(findings) > 0,
     }
-    return {"topology": topology, "enrolled_assets": len(rows), "active_assets": len(active), "affected_assets": len(affected),
+    return {"topology": topology, "enrolled_assets": len(rows), "expected_assets": expected or None,
+            "unenrolled_assets": max(0, expected - len(rows)), "active_assets": len(active),
+            "stale_assets": len(stale), "offline_assets": len(offline), "unknown_assets": len(unknown),
+            "collector_errors": sum(1 for row in rows if row.get("last_error")), "affected_assets": len(affected),
             "open_incidents": sum(int(row.get("open_incident_count") or 0) for row in rows), "telemetry_events": len(events),
-            "last_telemetry_at": latest, "coverage_percent": round((len(active) / len(rows) * 100) if rows else 0, 1),
+            "last_telemetry_at": latest, "coverage_percent": round((len(active) / denominator * 100) if denominator else 0, 1),
             "relationships": len(relationships), "readiness": readiness, "analytics_ready": all(readiness.values())}
 
 
@@ -1311,6 +1469,11 @@ def _reality_analytics_readiness(topology: str) -> Dict[str, Any]:
     endpoint_rows = endpoints(topology=topology, mode="reality")["endpoints"]
     relationships = list_relationships(topology)
     findings = list_vulnerability_findings(topology)
+    expected = max(0, int(os.getenv("ONYX_EXPECTED_DEVICE_COUNT") or "0"))
+    minimum_coverage = min(1.0, max(0.0, float(os.getenv("ONYX_MINIMUM_COVERAGE") or "0.8")))
+    active_count = sum(1 for row in endpoint_rows if row.get("status") == "active")
+    denominator = expected or len(endpoint_rows)
+    coverage = (active_count / denominator) if denominator else 0.0
     missing = []
     if not endpoint_rows:
         missing.append("enrolled endpoint inventory")
@@ -1318,6 +1481,8 @@ def _reality_analytics_readiness(topology: str) -> Dict[str, Any]:
         missing.append("observed network relationships")
     if not findings:
         missing.append("source-attributed vulnerability findings")
+    if coverage < minimum_coverage:
+        missing.append(f"reporting coverage >= {minimum_coverage * 100:.0f}%")
     return {
         "ready": not missing,
         "missing": missing,
@@ -1326,6 +1491,8 @@ def _reality_analytics_readiness(topology: str) -> Dict[str, Any]:
         "findings": len(findings),
         "patchable_findings": sum(1 for finding in findings if finding.get("fix_available")),
         "critical_findings": sum(1 for finding in findings if float(finding.get("cvss_score") or 0) >= 9.0),
+        "coverage_percent": round(coverage * 100, 1),
+        "minimum_coverage_percent": round(minimum_coverage * 100, 1),
     }
 
 
@@ -1337,6 +1504,21 @@ def vulnerability_ingest(payload: VulnerabilityIngestRequest, request: Request) 
     unknown = sorted({finding.endpoint_id for finding in payload.findings if finding.endpoint_id not in registered})
     if unknown:
         raise HTTPException(status_code=422, detail=f"Findings reference unregistered endpoints: {', '.join(unknown)}")
+    for finding in payload.findings:
+        identifier = (finding.cve_id or "").upper()
+        if identifier.startswith("SYNTH-"):
+            raise HTTPException(status_code=422, detail="Synthetic findings cannot enter Reality storage")
+        if identifier.startswith("CVE-"):
+            required = {"source_url", "source_name", "retrieved_at", "affected_product"}
+            missing_evidence = sorted(required - set(finding.evidence))
+            if missing_evidence or not finding.software or not finding.software_version:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Real CVE findings require software, software_version and source evidence: "
+                        + ", ".join(missing_evidence)
+                    ),
+                )
     stored = upsert_vulnerability_findings(payload.topology, [finding.model_dump() for finding in payload.findings])
     return {"stored": stored, "readiness": _reality_analytics_readiness(payload.topology)}
 
@@ -1377,15 +1559,112 @@ def reality_patch_roi(topology: str = Query(default="enterprise_20n")) -> dict:
         criticality = str((endpoint.get("metadata") or {}).get("asset_criticality") or "standard").lower()
         multiplier = 1.8 if criticality == "critical" else 1.3 if criticality == "high" else 1.0
         effort = float(finding.get("effort_hours") or (4 if "server" in str(endpoint.get("platform") or "").lower() else 2))
-        reduction = round(min(1.0, (float(finding["cvss_score"]) / 10) * multiplier * (1.0 if finding["fix_available"] else 0.45)), 3)
+        priority = round(min(1.0, (float(finding["cvss_score"]) / 10) * multiplier * (1.0 if finding["fix_available"] else 0.45)), 3)
         results.append({"node_id": finding["endpoint_id"], "hostname": endpoint.get("hostname", finding["endpoint_id"]),
                         "cve_id": finding.get("cve_id") or finding["finding_id"], "description": finding["title"],
                         "cvss_score": finding["cvss_score"], "effort_hours": effort, "fix_available": finding["fix_available"],
-                        "simulation_impact": reduction, "roi_score": round((reduction * 100) / effort, 2),
+                        "priority_score": round(priority * 100, 1),
+                        "priority_per_effort": round((priority * 100) / effort, 2),
+                        "measurement_type": "estimated_priority",
                         "source": finding["source"], "observed_at": finding["observed_at"], "evidence": finding["evidence"]})
-    results.sort(key=lambda item: (-item["roi_score"], -item["cvss_score"]))
+    results.sort(key=lambda item: (-item["priority_per_effort"], -item["cvss_score"]))
     return {"ready": True, "readiness": exposure["readiness"], "results": results,
-            "provenance": "live vulnerability findings; reduction is a prioritization estimate, not an attack simulation"}
+            "provenance": "live vulnerability findings; scores are prioritization estimates, not measured or simulated risk reduction"}
+
+
+_REMEDIATION_TRANSITIONS = {
+    "proposed": {"accepted", "exception"},
+    "accepted": {"in_progress", "exception"},
+    "in_progress": {"contained", "awaiting_verification", "exception"},
+    "contained": {"awaiting_verification", "reopened"},
+    "awaiting_verification": {"verified", "reopened", "exception"},
+    "verified": {"closed", "reopened"},
+    "exception": {"closed", "reopened"},
+    "closed": {"reopened"},
+    "reopened": {"in_progress", "exception"},
+}
+
+
+@app.get("/api/remediation/actions")
+def remediation_actions(
+    request: Request,
+    state: Optional[str] = Query(default=None),
+) -> dict:
+    _verify_admin_auth(request)
+    if state and state not in _REMEDIATION_TRANSITIONS:
+        raise HTTPException(status_code=422, detail="Unknown remediation state")
+    rows = list_remediation_actions(_organization_id(), state)
+    return {"actions": rows, "count": len(rows), "organization_id": _organization_id()}
+
+
+@app.post("/api/remediation/actions")
+def create_remediation(payload: RemediationActionCreateRequest, request: Request) -> dict:
+    actor = _verify_admin_auth(request)
+    endpoint = get_endpoint(payload.endpoint_id)
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+    finding = next(
+        (
+            row for row in list_vulnerability_findings(endpoint["topology"])
+            if row["finding_id"] == payload.finding_id and row["endpoint_id"] == payload.endpoint_id
+        ),
+        None,
+    )
+    if not finding:
+        raise HTTPException(status_code=404, detail="Source finding not found for endpoint")
+    action = create_remediation_action({
+        **payload.model_dump(),
+        "action_id": f"rem_{uuid.uuid4().hex}",
+        "organization_id": _organization_id(),
+        "actor": actor,
+    })
+    return {"action": action}
+
+
+@app.put("/api/remediation/actions/{action_id}")
+def update_remediation(
+    action_id: str, payload: RemediationActionUpdateRequest, request: Request
+) -> dict:
+    actor = _verify_admin_auth(request)
+    current = get_remediation_action(action_id)
+    if not current or current["organization_id"] != _organization_id():
+        raise HTTPException(status_code=404, detail="Remediation action not found")
+    if payload.state not in _REMEDIATION_TRANSITIONS[current["state"]]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid transition from {current['state']} to {payload.state}",
+        )
+    if payload.state == "verified":
+        required = {"source", "timestamp", "observation", "reviewer"}
+        if not payload.verification or not required.issubset(payload.verification):
+            raise HTTPException(status_code=422, detail="Verification evidence is incomplete")
+    if payload.state == "exception":
+        required = {"reason", "approver", "expiry", "compensating_control"}
+        if not payload.exception or not required.issubset(payload.exception):
+            raise HTTPException(status_code=422, detail="Exception evidence is incomplete")
+    updated = update_remediation_action(
+        action_id, payload.state, actor, payload.owner, payload.due_date,
+        payload.verification, payload.exception,
+    )
+    return {"action": updated}
+
+
+@app.get("/api/remediation/actions.csv")
+def export_remediation_actions(request: Request) -> Response:
+    _verify_admin_auth(request)
+    rows = list_remediation_actions(_organization_id())
+    output = io.StringIO()
+    fields = [
+        "action_id", "endpoint_id", "finding_id", "title", "owner", "due_date",
+        "priority", "state", "created_at", "updated_at",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        output.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=onyx-remediation-actions.csv"},
+    )
 
 
 @app.get("/api/reality/topology")
@@ -1454,8 +1733,14 @@ def _build_live_replay(result: dict, topology_key: str) -> dict:
 @app.post("/api/endpoints/{endpoint_id}/server-link")
 def set_endpoint_server_link(endpoint_id: str, payload: ServerLinkRequest, request: Request) -> dict:
     _verify_response_auth(request)
-    if not get_endpoint(endpoint_id):
+    endpoint = get_endpoint(endpoint_id)
+    if not endpoint:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+    if (endpoint.get("metadata") or {}).get("response_capable") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Endpoint has not advertised the requested response capability",
+        )
     set_server_link(endpoint_id, payload.disconnected)
     create_notification(
         "server_link", "warning" if payload.disconnected else "info",
@@ -1472,6 +1757,7 @@ def request_endpoint_command(
     request: Request,
     mode: Literal["reality", "demo"] = Query(default="reality"),
 ) -> dict:
+    _require_response_controls()
     if mode == "demo":
         if endpoint_id not in {row["endpoint_id"] for row in _demo_endpoints("enterprise_20n")}:
             raise HTTPException(status_code=404, detail="Demo endpoint not found")
@@ -1493,8 +1779,14 @@ def request_endpoint_command(
         DEMO_COMMANDS[command_id] = command
         return {"command": command, "mode": "demo"}
     _verify_response_auth(request)
-    if not get_endpoint(endpoint_id):
+    endpoint = get_endpoint(endpoint_id)
+    if not endpoint:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+    if (endpoint.get("metadata") or {}).get("response_capable") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Endpoint has not advertised response capability",
+        )
     if any(port < 1 or port > 65535 for port in payload.protected_ports):
         raise HTTPException(status_code=422, detail="Protected ports must be between 1 and 65535")
     active = [
@@ -1519,7 +1811,7 @@ def request_endpoint_command(
 
 @app.get("/api/endpoints/{endpoint_id}/commands/pending")
 def pending_endpoint_commands(endpoint_id: str, request: Request) -> dict:
-    _verify_telemetry_ingest_auth(request)
+    _verify_device_auth(request, endpoint_id)
     if not get_endpoint(endpoint_id):
         raise HTTPException(status_code=404, detail="Endpoint not registered")
     return {"commands": claim_pending_commands(endpoint_id)}
@@ -1532,7 +1824,7 @@ def acknowledge_endpoint_command(
     payload: ResponseCommandAckRequest,
     request: Request,
 ) -> dict:
-    _verify_telemetry_ingest_auth(request)
+    _verify_device_auth(request, endpoint_id)
     command = complete_response_command(
         command_id=command_id,
         endpoint_id=endpoint_id,
@@ -1549,10 +1841,13 @@ def acknowledge_endpoint_command(
         f"{endpoint_id} acknowledged the {command['action']} command.", endpoint_id=endpoint_id,
     )
     if payload.status == "succeeded" and payload.quarantined:
-        for incident in list_open_incidents(endpoint_id):
-            resolved = resolve_incident(incident["incident_id"], "endpoint_containment", "Resolved by successful quarantine")
-            if resolved:
-                create_notification("incident_resolved", "info", "Incident resolved by containment", resolved["summary"], endpoint_id, resolved["incident_id"])
+        create_notification(
+            "endpoint_contained",
+            "warning",
+            "Containment acknowledged; verification required",
+            f"{endpoint_id} reported containment. Open incidents remain open until reviewed.",
+            endpoint_id=endpoint_id,
+        )
     return {"command": command}
 
 
@@ -1743,12 +2038,7 @@ def telemetry_ingest(payload: TelemetryIngestRequest, request: Request) -> dict:
                 create_notification("incident_opened", "critical", f"Affected laptop: {endpoint.get('hostname')}", summary, endpoint_id, incident["incident_id"])
     stored = len(get_telemetry_events(payload.topology, 5000))
 
-    cache["sim_results"] = None
-    cache["patch_results"] = None
-    cache["last_replay"] = None
-    cache["sim_results_by_mode"].pop("reality", None)
-    cache["patch_results_by_mode"].pop("reality", None)
-    cache["last_replay_by_mode"].pop("reality", None)
+    _invalidate_reality_cache(payload.topology)
 
     return {
         "ingested": inserted,
@@ -1777,12 +2067,7 @@ def telemetry_load_sample(topology: str = Query(default="enterprise_20n")) -> di
 
     inserted = store_telemetry_events(topology, normalized)
 
-    cache["sim_results"] = None
-    cache["patch_results"] = None
-    cache["last_replay"] = None
-    cache["sim_results_by_mode"].pop("reality", None)
-    cache["patch_results_by_mode"].pop("reality", None)
-    cache["last_replay_by_mode"].pop("reality", None)
+    _invalidate_reality_cache(topology)
 
     return {
         "loaded": inserted,
@@ -1847,12 +2132,7 @@ def telemetry_ingest_live(payload: LiveTelemetryIngestRequest) -> dict:
     parsed_summary = _extract_json_object(stdout) or {}
     status_snapshot = telemetry_status_endpoint(payload.topology)
 
-    cache["sim_results"] = None
-    cache["patch_results"] = None
-    cache["last_replay"] = None
-    cache["sim_results_by_mode"].pop("reality", None)
-    cache["patch_results_by_mode"].pop("reality", None)
-    cache["last_replay_by_mode"].pop("reality", None)
+    _invalidate_reality_cache(payload.topology)
 
     return {
         "status": "ok",
@@ -1892,6 +2172,18 @@ def health() -> dict:
         "scenarios": (PROJECT_ROOT / SCENARIO_CONFIG_PATH).exists(),
         "marl_results": (PROJECT_ROOT / MARL_RESULTS_PATH).exists(),
         "report_html": (PROJECT_ROOT / REPORT_HTML_PATH).exists(),
+        "capabilities": {
+            "response_controls": _response_controls_enabled(),
+            "response_controls_default": "disabled",
+        },
+    }
+
+
+@app.get("/api/capabilities")
+def capabilities() -> dict:
+    return {
+        "response_controls": _response_controls_enabled(),
+        "response_controls_default": "disabled",
     }
 
 
@@ -1960,7 +2252,9 @@ def status(
             <= 30
         )
     )
-    sim_results = (cache.get("sim_results_by_mode") or {}).get(mode) or {}
+    sim_results = (cache.get("sim_results_by_mode") or {}).get(
+        _scoped_cache_key(mode, topology)
+    ) or {}
     if sim_results:
         payload["last_simulation"] = {
             "timestamp": sim_results.get("data_freshness_at") or (datetime.utcnow().isoformat() + "Z"),
@@ -2040,6 +2334,8 @@ def simulate(payload: SimulationRequest) -> dict:
     result["requested_data_source"] = "simulation"
     result["data_source"] = "simulation"
     result["data_source_note"] = "Offline world-model run; real endpoint telemetry was not used as attack input."
+    result["measurement_type"] = "simulated_counterfactual"
+    result["research_only"] = True
     result["summary"] = _build_result_summary(result)
     replay = _build_replay(result, payload.topology)
     replay["evidence"] = _build_world_model_evidence(
@@ -2055,8 +2351,9 @@ def simulate(payload: SimulationRequest) -> dict:
     result["replay"] = replay
     cache["sim_results"] = result
     cache["last_replay"] = replay
-    cache["sim_results_by_mode"][payload.mode] = result
-    cache["last_replay_by_mode"][payload.mode] = replay
+    scoped_key = _scoped_cache_key(payload.mode, payload.topology)
+    cache["sim_results_by_mode"][scoped_key] = result
+    cache["last_replay_by_mode"][scoped_key] = replay
     return result
 
 
@@ -2135,9 +2432,9 @@ def replay_latest(
     mode: Literal["reality", "demo"] = Query(default="reality"),
 ) -> dict:
     _resolve_topology(topology)
-    replay = (cache.get("last_replay_by_mode") or {}).get(mode)
-    if replay and replay.get("topology") != topology:
-        replay = None
+    replay = (cache.get("last_replay_by_mode") or {}).get(
+        _scoped_cache_key(mode, topology)
+    )
     return {"replay": replay, "mode": mode}
 
 
@@ -2192,7 +2489,7 @@ def patch_optimize(payload: PatchRequest) -> dict:
         data_source=payload.data_source,
         telemetry_weight=payload.telemetry_weight,
     )
-    cache["patch_results_by_mode"][payload.mode] = generated["results"]
+    cache["patch_results_by_mode"][_scoped_cache_key(payload.mode, payload.topology)] = generated["results"]
     cache["patch_results"] = generated["results"]
     cache["cost_ranking"] = None
     cache["explainability"] = None
@@ -2319,7 +2616,8 @@ def patch_results(
     refresh: bool = Query(default=False),
     mode: Literal["reality", "demo"] = Query(default="reality"),
 ) -> dict:
-    cached = (cache.get("patch_results_by_mode") or {}).get(mode)
+    scoped_key = _scoped_cache_key(mode, topology)
+    cached = (cache.get("patch_results_by_mode") or {}).get(scoped_key)
     if cached and not refresh:
         ranked = rank_cost_aware_patches(
             patch_results=cached,
@@ -2344,7 +2642,7 @@ def patch_results(
         data_source=data_source,
         telemetry_weight=telemetry_weight,
     )
-    cache["patch_results_by_mode"][mode] = generated["results"]
+    cache["patch_results_by_mode"][scoped_key] = generated["results"]
     ranked = rank_cost_aware_patches(
         patch_results=generated["results"],
         topology_path=str(PROJECT_ROOT / _resolve_topology(topology)),

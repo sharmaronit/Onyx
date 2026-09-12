@@ -39,7 +39,7 @@ export function MiniMap({
   nodes?: MapNode[];
   edges?: MapEdge[];
   compromised?: string[];
-  active?: string;
+  active?: string | undefined;
   onSelect?: (id: string) => void;
   height?: number;
   pathStepIds?: string[];
@@ -104,98 +104,167 @@ export function MiniMap({
   };
 
   return (
-    <div className={`relative mx-auto w-full overflow-hidden rounded-md overscroll-contain ${dragging ? "cursor-grabbing" : "cursor-grab"}`} style={{ height: `${height}px`, aspectRatio: "16 / 9", backgroundColor: "var(--map-canvas)" }} onWheel={(event) => { event.preventDefault(); adjustZoom(event.deltaY > 0 ? -0.05 : 0.05); }} onPointerDown={beginDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
-      <div className="absolute right-3 top-3 z-10 flex overflow-hidden rounded-md border border-black/10 bg-white/90 shadow-sm dark:border-white/10 dark:bg-black/40" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" onClick={() => adjustZoom(0.1)} className="px-2.5 py-1 text-sm font-semibold text-foreground hover:bg-black/5 dark:hover:bg-white/10" aria-label="Zoom in">+</button>
-        <span className="border-x border-black/10 px-2 py-1 text-[10px] tabular text-muted-foreground dark:border-white/10">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => adjustZoom(-0.1)} className="px-2.5 py-1 text-sm font-semibold text-foreground hover:bg-black/5 dark:hover:bg-white/10" aria-label="Zoom out">−</button>
-        <button type="button" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="border-l border-black/10 px-2 py-1 text-[10px] text-muted-foreground hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10" aria-label="Reset zoom">Reset</button>
-      </div>
-      <div className="absolute inset-0 transition-transform duration-150 ease-out" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: "center" }}>
-      <svg
-        viewBox="0 0 100 100"
-        preserveAspectRatio="xMidYMid meet"
-        className="absolute inset-0 h-full w-full"
+    <div
+      className={`relative mx-auto w-full overflow-hidden rounded-md overscroll-contain ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+      style={{ height: `${height}px`, aspectRatio: "16 / 9", backgroundColor: "var(--map-canvas)" }}
+      onWheel={(event) => {
+        event.preventDefault();
+        adjustZoom(event.deltaY > 0 ? -0.05 : 0.05);
+      }}
+      onPointerDown={beginDrag}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      <div
+        className="absolute right-3 top-3 z-10 flex overflow-hidden rounded-md border border-black/10 bg-white/90 shadow-sm dark:border-white/10 dark:bg-black/40"
+        onPointerDown={(event) => event.stopPropagation()}
       >
-        <defs>
-          <marker id="onyx-arrow-hot" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse" markerUnits="strokeWidth">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--destructive)" />
-          </marker>
-          <marker id="onyx-arrow-neutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse" markerUnits="strokeWidth">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--secondary-foreground)" />
-          </marker>
-        </defs>
-        {edges.map((edge, i) => {
-          const a = edge.source;
-          const b = edge.target;
-          const na = nodeById(a);
-          const nb = nodeById(b);
-          if (!na || !nb) return null;
-          const hot = compromised.includes(a) || compromised.includes(b);
+        <button
+          type="button"
+          onClick={() => adjustZoom(0.1)}
+          className="px-2.5 py-1 text-sm font-semibold text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <span className="border-x border-black/10 px-2 py-1 text-[10px] tabular text-muted-foreground dark:border-white/10">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={() => adjustZoom(-0.1)}
+          className="px-2.5 py-1 text-sm font-semibold text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+          className="border-l border-black/10 px-2 py-1 text-[10px] text-muted-foreground hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+          aria-label="Reset zoom"
+        >
+          Reset
+        </button>
+      </div>
+      <div
+        className="absolute inset-0 transition-transform duration-150 ease-out"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "center",
+        }}
+      >
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="xMidYMid meet"
+          className="absolute inset-0 h-full w-full"
+        >
+          <defs>
+            <marker
+              id="onyx-arrow-hot"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+              markerUnits="strokeWidth"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--destructive)" />
+            </marker>
+            <marker
+              id="onyx-arrow-neutral"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+              markerUnits="strokeWidth"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--secondary-foreground)" />
+            </marker>
+          </defs>
+          {edges.map((edge, i) => {
+            const a = edge.source;
+            const b = edge.target;
+            const na = nodeById(a);
+            const nb = nodeById(b);
+            if (!na || !nb) return null;
+            const hot = compromised.includes(a) || compromised.includes(b);
+            return (
+              <line
+                key={`${a}-${b}-${i}`}
+                x1={na.x}
+                y1={na.y}
+                x2={nb.x}
+                y2={nb.y}
+                stroke={hot ? "var(--destructive)" : "var(--secondary-foreground)"}
+                strokeOpacity={hot ? 0.9 : 0.42}
+                strokeWidth={hot ? 0.85 : 0.6}
+                markerEnd={`url(#${hot ? "onyx-arrow-hot" : "onyx-arrow-neutral"})`}
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+        </svg>
+        {layoutedNodes.map((n) => {
+          const isHot =
+            compromised.includes(n.node_id) ||
+            n.security_state === "compromised" ||
+            n.security_state === "affected";
+          const isActive = active === n.node_id;
+          const isCritical = n.is_critical_asset;
+          const endpointState = n.endpoint_status as string | undefined;
+          const warning = n.security_state === "warning";
+          const compromisedState = n.security_state === "compromised";
+          const criticalState = n.security_state === "critical";
+          const pathStep = pathStepIds.indexOf(n.node_id) + 1;
+          const endpointColor =
+            endpointState === "quarantined"
+              ? "bg-warning ring-warning/30"
+              : criticalState
+                ? "bg-primary ring-primary/30"
+                : compromisedState
+                  ? "bg-destructive ring-destructive/30"
+                  : warning
+                    ? "bg-warning ring-warning/30"
+                    : endpointState === "active"
+                      ? "bg-success ring-success/30"
+                      : endpointState === "offline"
+                        ? "bg-secondary-foreground ring-transparent"
+                        : null;
           return (
-            <line
-              key={`${a}-${b}-${i}`}
-              x1={na.x}
-              y1={na.y}
-              x2={nb.x}
-              y2={nb.y}
-              stroke={hot ? "var(--destructive)" : "var(--secondary-foreground)"}
-              strokeOpacity={hot ? 0.9 : 0.42}
-              strokeWidth={hot ? 0.85 : 0.6}
-              markerEnd={`url(#${hot ? "onyx-arrow-hot" : "onyx-arrow-neutral"})`}
-              vectorEffect="non-scaling-stroke"
-            />
+            <button
+              key={n.node_id}
+              onClick={() => onSelect?.(n.node_id)}
+              onPointerDown={(event) => event.stopPropagation()}
+              aria-label={`Select ${n.node_id}`}
+              style={{ left: `${n.x}%`, top: `${n.y}%` }}
+              className="group absolute -translate-x-1/2 -translate-y-1/2 text-center"
+            >
+              <span
+                className={`mx-auto block h-4 w-4 rounded-full border-2 border-[var(--map-canvas)] shadow-[0_2px_8px_rgba(0,0,0,0.24)] ring-2 transition-all ${`${endpointColor ? endpointColor : isHot ? "bg-destructive ring-destructive/25" : isCritical ? "bg-primary-on-dark ring-transparent" : "bg-secondary-foreground ring-transparent"} ${isActive ? "scale-[1.35] ring-4 ring-primary/40" : ""}`}`}
+              />
+              {pathStep > 0 && (
+                <span className="absolute -left-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-bold text-background shadow-sm">
+                  {pathStep}
+                </span>
+              )}
+              <span
+                className={`mt-1.5 block max-w-[150px] rounded-md bg-[var(--map-canvas)]/90 px-1.5 py-1 text-[11px] font-semibold leading-tight shadow-sm ${
+                  isHot ? "text-destructive" : "text-foreground"
+                }`}
+              >
+                {n.node_id}
+              </span>
+            </button>
           );
         })}
-      </svg>
-      {layoutedNodes.map((n) => {
-        const isHot = compromised.includes(n.node_id) || n.security_state === "compromised" || n.security_state === "affected";
-        const isActive = active === n.node_id;
-        const isCritical = n.is_critical_asset;
-        const endpointState = n.endpoint_status as string | undefined;
-        const warning = n.security_state === "warning";
-        const compromisedState = n.security_state === "compromised";
-        const criticalState = n.security_state === "critical";
-        const pathStep = pathStepIds.indexOf(n.node_id) + 1;
-        const endpointColor =
-          endpointState === "quarantined"
-            ? "bg-warning ring-warning/30"
-            : criticalState
-              ? "bg-primary ring-primary/30"
-              : compromisedState
-              ? "bg-destructive ring-destructive/30"
-              : warning
-                ? "bg-warning ring-warning/30"
-            : endpointState === "active"
-              ? "bg-success ring-success/30"
-              : endpointState === "offline"
-                ? "bg-secondary-foreground ring-transparent"
-                : null;
-        return (
-          <button
-            key={n.node_id}
-            onClick={() => onSelect?.(n.node_id)}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-label={`Select ${n.node_id}`}
-            style={{ left: `${n.x}%`, top: `${n.y}%` }}
-            className="group absolute -translate-x-1/2 -translate-y-1/2 text-center"
-          >
-            <span
-              className={`mx-auto block h-4 w-4 rounded-full border-2 border-[var(--map-canvas)] shadow-[0_2px_8px_rgba(0,0,0,0.24)] ring-2 transition-all ${
-                `${endpointColor ? endpointColor : isHot ? "bg-destructive ring-destructive/25" : isCritical ? "bg-primary-on-dark ring-transparent" : "bg-secondary-foreground ring-transparent"} ${isActive ? "scale-[1.35] ring-4 ring-primary/40" : ""}`
-              }`}
-            />
-            {pathStep > 0 && <span className="absolute -left-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-bold text-background shadow-sm">{pathStep}</span>}
-            <span
-              className={`mt-1.5 block max-w-[150px] rounded-md bg-[var(--map-canvas)]/90 px-1.5 py-1 text-[11px] font-semibold leading-tight shadow-sm ${
-                isHot ? "text-destructive" : "text-foreground"
-              }`}
-            >
-              {n.node_id}
-            </span>
-          </button>
-        );
-      })}
       </div>
       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-wrap justify-center gap-3 rounded-full border border-black/5 bg-[var(--map-canvas)]/95 px-4 py-2 text-[10px] text-muted-foreground shadow-sm dark:border-white/10">
         <span className="flex items-center gap-1.5">

@@ -4,6 +4,7 @@ import { Locked, Metric, Panel, Shell } from "@/components/soc/Shell";
 import {
   useEndpointCommand,
   useEndpoints,
+  useCapabilities,
   useResolveIncident,
   useServerLink,
   useTelemetryEvents,
@@ -30,8 +31,8 @@ export const Route = createFileRoute("/telemetry")({
 
 function eventEvidence(event: TelemetryEvent) {
   const raw = event.raw ?? {};
-  const threat = typeof raw.threat_name === "string" ? raw.threat_name : null;
-  const path = typeof raw.path === "string" ? raw.path : null;
+  const threat = typeof raw["threat_name"] === "string" ? raw["threat_name"] : null;
+  const path = typeof raw["path"] === "string" ? raw["path"] : null;
   if (threat && path) return `${threat} · ${path}`;
   if (threat) return threat;
   if (path) return path;
@@ -46,7 +47,12 @@ function ageLabel(seconds: number | null | undefined) {
 
 function endpointTone(endpoint: EndpointAgent) {
   if (endpoint.security_state === "critical") return "bg-primary";
-  if (endpoint.security_state === "compromised" || endpoint.security_state === "affected" || endpoint.quarantined) return "bg-destructive";
+  if (
+    endpoint.security_state === "compromised" ||
+    endpoint.security_state === "affected" ||
+    endpoint.quarantined
+  )
+    return "bg-destructive";
   if (endpoint.security_state === "warning") return "bg-warning";
   if (endpoint.status === "active") return "bg-success";
   return "bg-tile-muted";
@@ -56,7 +62,9 @@ function Telemetry() {
   const { role } = useRole();
   const { mode } = useAppMode();
   const allowedToView = can.viewTelemetry(role);
-  const allowedToRespond = can.respondToEndpoint(role);
+  const capabilities = useCapabilities();
+  const responseControlsEnabled = capabilities.data?.response_controls === true;
+  const allowedToRespond = can.respondToEndpoint(role) && responseControlsEnabled;
   const [live, setLive] = useState(true);
   const [topology, setTopology] = useState("enterprise_20n");
   const [responseKey, setResponseKey] = useState("");
@@ -80,7 +88,11 @@ function Telemetry() {
     0,
   );
   const quarantinedCount = endpoints.filter((endpoint) => endpoint.quarantined).length;
-  const affectedCount = endpoints.filter((endpoint) => ["warning", "compromised", "critical", "affected"].includes(endpoint.security_state ?? "healthy")).length;
+  const affectedCount = endpoints.filter((endpoint) =>
+    ["warning", "compromised", "critical", "affected"].includes(
+      endpoint.security_state ?? "healthy",
+    ),
+  ).length;
   const activeCount = endpoints.filter((endpoint) => endpoint.status === "active").length;
   const loadError = status.error || endpointQuery.error || eventQuery.error || topologies.error;
 
@@ -156,6 +168,11 @@ function Telemetry() {
         </div>
 
         <Panel title="Live controls">
+          {!responseControlsEnabled && (
+            <div className="border-b border-warning/30 bg-warning/5 px-5 py-3 text-[12px] text-warning">
+              Response controls are disabled by the server. Telemetry remains read-only.
+            </div>
+          )}
           <div className="grid gap-4 p-5 md:grid-cols-3">
             <label className="text-[12px] text-muted-foreground">
               Topology
@@ -172,13 +189,17 @@ function Telemetry() {
               </select>
             </label>
             <label className="text-[12px] text-muted-foreground">
-              {mode === "demo" ? "Demo response" : "Response authorization key (optional on this appliance)"}
+              {mode === "demo" ? "Demo response" : "Response authorization key"}
               <input
                 type="password"
                 autoComplete="off"
                 value={responseKey}
                 onChange={(event) => setResponseKey(event.target.value)}
-                placeholder={mode === "demo" ? "No key required for simulated actions" : "Required only when a response key is configured"}
+                placeholder={
+                  mode === "demo"
+                    ? "No key required for simulated actions"
+                    : "Required for response actions"
+                }
                 disabled={mode === "demo"}
                 className="mt-1 block w-full rounded-md border border-hairline bg-card px-3 py-2 text-foreground"
               />
@@ -210,104 +231,153 @@ function Telemetry() {
                 No endpoint agent has registered with this backend yet.
               </p>
             )}
-            {[...endpoints].sort((a, b) => Number(["warning", "compromised", "critical", "affected"].includes(b.security_state ?? "")) - Number(["warning", "compromised", "critical", "affected"].includes(a.security_state ?? ""))).map((endpoint) => {
-              const actionPending =
-                endpoint.latest_command &&
-                ["pending", "delivered"].includes(endpoint.latest_command.status);
-              const responseCapable = endpoint.metadata.response_capable === true;
-              return (
-                <div key={endpoint.endpoint_id} className={`rounded-lg border p-4 ${endpoint.security_state === "critical" ? "border-primary bg-primary/5" : endpoint.security_state === "compromised" || endpoint.security_state === "affected" ? "border-destructive bg-destructive/5" : endpoint.security_state === "warning" ? "border-warning bg-warning/5" : "border-hairline"}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[13px] font-semibold">{endpoint.hostname}</p>
-                      <p className="font-mono text-[11px] text-muted-foreground">
-                        {endpoint.endpoint_id}
-                      </p>
-                    </div>
-                    <span className={`mt-1 h-2.5 w-2.5 rounded-full ${endpointTone(endpoint)}`} />
-                  </div>
-                  <dl className="mt-4 space-y-1.5 text-[12px] text-muted-foreground">
-                    <div className="flex justify-between">
-                      <dt>IP address</dt>
-                      <dd>{endpoint.ip_address || "unknown"}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Heartbeat</dt>
-                      <dd>{ageLabel(endpoint.seconds_since_last_seen)}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Agent</dt>
-                      <dd>v{endpoint.agent_version}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Defender threats</dt>
-                      <dd>{endpoint.threat_count}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Network state</dt>
-                      <dd>{endpoint.quarantined ? "quarantined" : endpoint.status}</dd>
-                    </div>
-                  </dl>
-                  {endpoint.latest_command && (
-                    <p className="mt-3 rounded bg-pearl p-2 text-[11px] text-muted-foreground">
-                      {endpoint.latest_command.action}: {endpoint.latest_command.status}
-                      {endpoint.latest_command.error_message
-                        ? ` · ${endpoint.latest_command.error_message}`
-                        : ""}
-                    </p>
-                  )}
-                  {endpoint.last_error && (
-                    <p className="mt-2 text-[11px] text-destructive">
-                      Agent error: {endpoint.last_error}
-                    </p>
-                  )}
-                  {endpoint.latest_incident && (
-                    <div className="mt-3 rounded bg-destructive/10 p-2 text-[11px] text-destructive">
-                      <p className="font-semibold">Affected · {endpoint.latest_incident.source === "simulated" ? "Safe simulated detection" : "Microsoft Defender"}</p>
-                      <p>{endpoint.latest_incident.summary}</p>
-                      <button
-                        disabled={!allowedToRespond || resolveIncident.isPending}
-                        onClick={() => resolveIncident.mutate({ incidentId: endpoint.latest_incident!.incident_id, resolvedBy: role, reason, responseKey })}
-                        className="mt-2 rounded bg-foreground px-2 py-1 text-primary-foreground disabled:bg-chip"
-                      >Resolve incident</button>
-                    </div>
-                  )}
-                  {["warning", "compromised", "critical", "affected"].includes(endpoint.security_state ?? "") && (
-                    <button
-                      disabled={!allowedToRespond || serverLink.isPending}
-                      onClick={() => serverLink.mutate({ endpointId: endpoint.endpoint_id, disconnected: !endpoint.server_link_disconnected, requestedBy: role, reason, responseKey })}
-                      className="mt-3 w-full rounded-md border border-destructive px-3 py-2 text-[12px] text-destructive disabled:border-chip disabled:text-muted-foreground"
-                    >{endpoint.server_link_disconnected ? "Restore server link" : "Cut server link"}</button>
-                  )}
-                  <button
-                    disabled={
-                      !allowedToRespond ||
-                      reason.trim().length < 3 ||
-                      !!actionPending ||
-                      command.isPending ||
-                      endpoint.status !== "active" ||
-                      !responseCapable
-                    }
-                    onClick={() =>
-                      requestAction(endpoint, endpoint.quarantined ? "restore" : "quarantine")
-                    }
-                    className="mt-4 w-full rounded-md bg-foreground px-3 py-2 text-[12px] text-primary-foreground disabled:bg-chip disabled:text-muted-foreground"
+            {[...endpoints]
+              .sort(
+                (a, b) =>
+                  Number(
+                    ["warning", "compromised", "critical", "affected"].includes(
+                      b.security_state ?? "",
+                    ),
+                  ) -
+                  Number(
+                    ["warning", "compromised", "critical", "affected"].includes(
+                      a.security_state ?? "",
+                    ),
+                  ),
+              )
+              .map((endpoint) => {
+                const actionPending =
+                  endpoint.latest_command &&
+                  ["pending", "delivered"].includes(endpoint.latest_command.status);
+                const responseCapable = endpoint.metadata["response_capable"] === true;
+                return (
+                  <div
+                    key={endpoint.endpoint_id}
+                    className={`rounded-lg border p-4 ${endpoint.security_state === "critical" ? "border-primary bg-primary/5" : endpoint.security_state === "compromised" || endpoint.security_state === "affected" ? "border-destructive bg-destructive/5" : endpoint.security_state === "warning" ? "border-warning bg-warning/5" : "border-hairline"}`}
                   >
-                    {!responseCapable
-                      ? "Heartbeat-only agent"
-                      : actionPending
-                        ? "Awaiting endpoint acknowledgement"
-                        : endpoint.quarantined
-                          ? "Restore protected services"
-                          : "Quarantine protected services"}
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[13px] font-semibold">{endpoint.hostname}</p>
+                        <p className="font-mono text-[11px] text-muted-foreground">
+                          {endpoint.endpoint_id}
+                        </p>
+                      </div>
+                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${endpointTone(endpoint)}`} />
+                    </div>
+                    <dl className="mt-4 space-y-1.5 text-[12px] text-muted-foreground">
+                      <div className="flex justify-between">
+                        <dt>IP address</dt>
+                        <dd>{endpoint.ip_address || "unknown"}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Heartbeat</dt>
+                        <dd>{ageLabel(endpoint.seconds_since_last_seen)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Agent</dt>
+                        <dd>v{endpoint.agent_version}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Defender threats</dt>
+                        <dd>{endpoint.threat_count}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt>Network state</dt>
+                        <dd>{endpoint.quarantined ? "quarantined" : endpoint.status}</dd>
+                      </div>
+                    </dl>
+                    {endpoint.latest_command && (
+                      <p className="mt-3 rounded bg-pearl p-2 text-[11px] text-muted-foreground">
+                        {endpoint.latest_command.action}: {endpoint.latest_command.status}
+                        {endpoint.latest_command.error_message
+                          ? ` · ${endpoint.latest_command.error_message}`
+                          : ""}
+                      </p>
+                    )}
+                    {endpoint.last_error && (
+                      <p className="mt-2 text-[11px] text-destructive">
+                        Agent error: {endpoint.last_error}
+                      </p>
+                    )}
+                    {endpoint.latest_incident && (
+                      <div className="mt-3 rounded bg-destructive/10 p-2 text-[11px] text-destructive">
+                        <p className="font-semibold">
+                          Affected ·{" "}
+                          {endpoint.latest_incident.source === "simulated"
+                            ? "Safe simulated detection"
+                            : "Microsoft Defender"}
+                        </p>
+                        <p>{endpoint.latest_incident.summary}</p>
+                        <button
+                          disabled={!allowedToRespond || resolveIncident.isPending}
+                          onClick={() =>
+                            resolveIncident.mutate({
+                              incidentId: endpoint.latest_incident!.incident_id,
+                              resolvedBy: role,
+                              reason,
+                              responseKey,
+                            })
+                          }
+                          className="mt-2 rounded bg-foreground px-2 py-1 text-primary-foreground disabled:bg-chip"
+                        >
+                          Resolve incident
+                        </button>
+                      </div>
+                    )}
+                    {["warning", "compromised", "critical", "affected"].includes(
+                      endpoint.security_state ?? "",
+                    ) && (
+                      <button
+                        disabled={!allowedToRespond || serverLink.isPending}
+                        onClick={() =>
+                          serverLink.mutate({
+                            endpointId: endpoint.endpoint_id,
+                            disconnected: !endpoint.server_link_disconnected,
+                            requestedBy: role,
+                            reason,
+                            responseKey,
+                          })
+                        }
+                        className="mt-3 w-full rounded-md border border-destructive px-3 py-2 text-[12px] text-destructive disabled:border-chip disabled:text-muted-foreground"
+                      >
+                        {endpoint.server_link_disconnected
+                          ? "Restore server link"
+                          : "Cut server link"}
+                      </button>
+                    )}
+                    <button
+                      disabled={
+                        !allowedToRespond ||
+                        reason.trim().length < 3 ||
+                        !!actionPending ||
+                        command.isPending ||
+                        endpoint.status !== "active" ||
+                        !responseCapable
+                      }
+                      onClick={() =>
+                        requestAction(endpoint, endpoint.quarantined ? "restore" : "quarantine")
+                      }
+                      className="mt-4 w-full rounded-md bg-foreground px-3 py-2 text-[12px] text-primary-foreground disabled:bg-chip disabled:text-muted-foreground"
+                    >
+                      {!responseCapable
+                        ? "Heartbeat-only agent"
+                        : actionPending
+                          ? "Awaiting endpoint acknowledgement"
+                          : endpoint.quarantined
+                            ? "Restore protected services"
+                            : "Quarantine protected services"}
+                    </button>
+                  </div>
+                );
+              })}
           </div>
           {!allowedToRespond && (
             <div className="border-t border-hairline p-5">
-              <Locked>Endpoint response actions require the Security Architect role.</Locked>
+              <Locked>
+                {responseControlsEnabled
+                  ? "Endpoint response actions require the Security Architect role."
+                  : "Endpoint response actions are disabled by the server."}
+              </Locked>
             </div>
           )}
         </Panel>

@@ -21,13 +21,12 @@ Usage:
 
 from __future__ import annotations
 import argparse
-import copy
+import hashlib
 import json
+import random
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional, Sequence
 from tqdm import tqdm
-
-import numpy as np
 
 from src.graph.network_graph import NetworkGraph
 from src.graph.topology_loader import load_topology
@@ -44,34 +43,37 @@ def evaluate_agent_success_rate(
     cve_db: list,
     n_episodes: int = 100,
     seed: int = 42,
+    episode_seeds: Optional[Sequence[int]] = None,
 ) -> float:
-    """Run n_episodes with the agent on graph. Return fraction that reached a critical asset."""
-    from src.envs.attacker_env import AttackerEnv
-    import tempfile, json as _json, os
+    """Run episodes on an already prepared graph.
 
-    # Write graph to temp topology file (AttackerEnv loads from JSON)
-    # We rebuild the graph state from the NetworkGraph object
-    # Build a fresh AttackerEnv every call with a patched temp topology
-    # Fastest approach: subclass AttackerEnv to accept graph directly
+    The caller owns CVE tagging and interventions. This function deliberately
+    does not call ``tag_graph`` because doing so would undo a simulated patch.
+    Passing the same ``episode_seeds`` to baseline and intervention runs gives
+    a paired, reproducible comparison.
+    """
 
     from src.envs.attacker_env import _build_obs, _build_action_mask
     from src.simulator.rule_based import AttackSimulator, recommended_episode_limit
-    import random
-
     node_order = sorted(graph.node_ids)
     n_real = len(node_order)
     max_steps = recommended_episode_limit(graph)
-    rng = random.Random(seed)
+    if episode_seeds is None:
+        rng = random.Random(seed)
+        seeds = [rng.randrange(0, 2**31) for _ in range(n_episodes)]
+    else:
+        seeds = [int(value) for value in episode_seeds]
+        if len(seeds) != n_episodes:
+            raise ValueError("episode_seeds length must equal n_episodes")
 
     successes = 0
-    for ep in range(n_episodes):
+    for episode_seed in seeds:
         g = graph.deep_copy()
-        tag_graph(g, cve_db)
         sim = AttackSimulator(
             g,
             max_steps=max_steps,
             max_attempts_per_target=1,
-            seed=rng.randint(0, 10**6),
+            seed=episode_seed,
         )
         sim.reset()
         compromised = set(sim.compromised)
@@ -135,7 +137,28 @@ def compute_patch_impact(
         print(f"Loaded agent from {agent_path}")
         print(f"Computing baseline ({n_baseline} episodes)...")
 
-    baseline_rate = evaluate_agent_success_rate(agent, graph, cve_db, n_episodes=n_baseline, seed=seed)
+    seed_rng = random.Random(seed)
+    baseline_seeds = [seed_rng.randrange(0, 2**31) for _ in range(n_baseline)]
+    comparison_seeds = [seed_rng.randrange(0, 2**31) for _ in range(n_eval_per_patch)]
+    input_snapshot = hashlib.sha256(Path(topology_path).read_bytes()).hexdigest()
+    seed_set_sha256 = hashlib.sha256(
+        json.dumps(comparison_seeds, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    model_snapshot = hashlib.sha256(Path(agent_path).read_bytes()).hexdigest()
+    baseline_rate = evaluate_agent_success_rate(
+        agent,
+        graph,
+        cve_db,
+        n_episodes=n_baseline,
+        episode_seeds=baseline_seeds,
+    )
+    paired_baseline_rate = evaluate_agent_success_rate(
+        agent,
+        graph,
+        cve_db,
+        n_episodes=n_eval_per_patch,
+        episode_seeds=comparison_seeds,
+    )
 
     if verbose:
         print(f"Baseline attack success rate: {baseline_rate*100:.1f}%")
@@ -162,10 +185,10 @@ def compute_patch_impact(
         patched_rate = evaluate_agent_success_rate(
             agent, patched_graph, cve_db,
             n_episodes=n_eval_per_patch,
-            seed=seed + hash(node_id + cve.cve_id) % 10**6
+            episode_seeds=comparison_seeds,
         )
 
-        impact = baseline_rate - patched_rate
+        impact = paired_baseline_rate - patched_rate
 
         results.append({
             "node_id": node_id,
@@ -175,12 +198,21 @@ def compute_patch_impact(
             "cvss_score": cve.cvss_score,
             "cvss_severity": cve.severity_label,
             "attack_vector": cve.attack_vector,
-            "baseline_success_rate": round(baseline_rate, 4),
+            "baseline_success_rate": round(paired_baseline_rate, 4),
             "patched_success_rate": round(patched_rate, 4),
             "simulation_impact": round(impact, 4),
             "simulation_rank": None,    # filled below
             "cvss_rank": None,          # filled below
             "description": cve.description[:120],
+            "measurement_type": "simulated_counterfactual",
+            "evidence": {
+                "topology_sha256": input_snapshot,
+                "model_sha256": model_snapshot,
+                "seed_set_sha256": seed_set_sha256,
+                "episode_count": n_eval_per_patch,
+                "intervention": {"type": "remove_cve", "node_id": node_id, "cve_id": cve.cve_id},
+                "engine_version": "paired-counterfactual-v2",
+            },
         })
 
     # ---- Assign simulation ranks ----
@@ -205,7 +237,7 @@ def compute_patch_impact(
         for r in results[:5]:
             print(f"{r['simulation_rank']:>4}  {r['node_id']:25s}  {r['cve_id']:18s}  "
                   f"{r['cvss_rank']:>9}  {r['simulation_impact']*100:>7.1f}%")
-        print(f"\nBaseline: {baseline_rate*100:.1f}% attack success")
+        print(f"\nBaseline: {paired_baseline_rate*100:.1f}% attack success")
         print(f"Top fix: Patching '{results[0]['node_id']}' drops success to "
               f"{results[0]['patched_success_rate']*100:.1f}% "
               f"({results[0]['simulation_impact']*100:.1f}pp reduction)")

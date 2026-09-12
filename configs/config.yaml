@@ -74,6 +74,20 @@ telemetry:
   fallback_to_simulation: true
   default_hybrid_telemetry_weight: 0.4
 
+# Endpoint isolation and server-link actions are also protected by the
+# ONYX_RESPONSE_CONTROLS_ENABLED environment variable. It defaults to false.
+response_controls:
+  enabled: false
+  command_lease_seconds: 60
+
+pilot:
+  organization_id_env: "ONYX_ORGANIZATION_ID"
+  expected_device_count_env: "ONYX_EXPECTED_DEVICE_COUNT"
+  minimum_coverage: 0.8
+  heartbeat_fresh_seconds: 300
+  heartbeat_stale_seconds: 86400
+  allow_legacy_shared_agent_key: false
+
 paths:
   topologies: "data/topologies"
   cve_dataset: "data/cve/cve_dataset.json"

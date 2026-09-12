@@ -24,6 +24,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+throw 'This public bundle server is disabled because it exposes reusable credentials. Use an authenticated HTTPS package channel and per-device enrollment.'
+
 function Write-Stage {
     param([string]$Message)
     Write-Host "[Onyx Internet Setup] $Message"
