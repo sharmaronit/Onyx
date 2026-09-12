@@ -136,6 +136,8 @@ export function useResolveIncident() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["endpoints"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["reality-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["reality-topology"] });
     },
   });
 }

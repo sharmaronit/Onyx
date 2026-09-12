@@ -11,6 +11,8 @@ import subprocess
 import statistics
 import sys
 import secrets
+import threading
+from collections import defaultdict, deque
 
 import time
 import uuid
@@ -68,6 +70,7 @@ from .database import (
     rotate_device_credential,
     record_agent_batch,
     record_agent_audit,
+    purge_expired_agent_data,
     store_telemetry_events,
     update_training_job,
     update_remediation_action,
@@ -75,6 +78,7 @@ from .database import (
     upsert_relationship,
     upsert_vulnerability_findings,
 )
+from . import database as database_store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -106,6 +110,8 @@ COST_MODEL_PATH = "configs/cost_model.json"
 
 app = FastAPI(title="Onyx Web API", version="1.0.0")
 logger = logging.getLogger("onyx.api")
+_device_rate_windows: Dict[str, deque[float]] = defaultdict(deque)
+_device_rate_lock = threading.Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -1151,6 +1157,26 @@ def _verify_device_auth(request: Request, endpoint_id: str) -> Dict[str, Any]:
     return binding
 
 
+def _enforce_device_rate_limit(endpoint_id: str, limit: int, window_seconds: int = 60) -> None:
+    now = time.monotonic()
+    key = f"{endpoint_id}:{limit}"
+    with _device_rate_lock:
+        window = _device_rate_windows[key]
+        while window and window[0] <= now - window_seconds:
+            window.popleft()
+        if len(window) >= limit:
+            raise HTTPException(status_code=429, detail="Device request rate exceeded", headers={"Retry-After": str(window_seconds)})
+        window.append(now)
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    try:
+        numbers = value.split("-", 1)[0].split(".")
+        return tuple(int(numbers[index]) if index < len(numbers) else 0 for index in range(3))
+    except (TypeError, ValueError):
+        return (0, 0, 0)
+
+
 def _verify_response_auth(request: Request) -> None:
     _require_response_controls()
     expected_api_key = (os.getenv("ONYX_RESPONSE_API_KEY") or "").strip()
@@ -1159,6 +1185,21 @@ def _verify_response_auth(request: Request) -> None:
     provided_api_key = _extract_api_key_from_request(request)
     if not provided_api_key or not hmac.compare_digest(provided_api_key, expected_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized endpoint response request")
+
+
+def _verify_incident_resolution_auth(request: Request) -> None:
+    """Authorize closing an incident without enabling endpoint containment.
+
+    Resolution is an analyst workflow update; unlike quarantine or restore, it
+    does not change endpoint state. It still requires the configured response
+    key and leaves endpoint response controls disabled by default.
+    """
+    expected_api_key = (os.getenv("ONYX_RESPONSE_API_KEY") or "").strip()
+    if not expected_api_key:
+        raise HTTPException(status_code=503, detail="Incident-resolution authorization is not configured")
+    provided_api_key = _extract_api_key_from_request(request)
+    if not provided_api_key or not hmac.compare_digest(provided_api_key, expected_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized incident-resolution request")
 
 
 def _extract_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
@@ -1360,6 +1401,9 @@ def revoke_device_credential(endpoint_id: str, request: Request) -> dict:
 @app.post("/api/endpoints/heartbeat")
 def endpoint_heartbeat(payload: EndpointHeartbeatRequest, request: Request) -> dict:
     binding = _verify_device_auth(request, payload.endpoint_id)
+    _enforce_device_rate_limit(payload.endpoint_id, 30)
+    if _version_tuple(payload.agent_version) < _version_tuple("1.0.0"):
+        raise HTTPException(status_code=426, detail="This Onyx Agent version is no longer supported")
     _resolve_topology(payload.topology)
     if len(json.dumps(payload.metadata, allow_nan=False)) > 8192:
         raise HTTPException(status_code=422, detail="Endpoint metadata must be at most 8 KiB")
@@ -1372,6 +1416,7 @@ def endpoint_heartbeat(payload: EndpointHeartbeatRequest, request: Request) -> d
             upsert_relationship(payload.endpoint_id, str(observation["target"]), payload.topology, str(observation.get("type") or "observed_connection"), float(observation.get("confidence") or 0.6))
     if not previous:
         create_notification("endpoint_online", "info", f"Laptop connected: {payload.hostname}", "A live endpoint heartbeat was received.", endpoint_id=payload.endpoint_id)
+    record_agent_audit(binding["organization_id"], payload.endpoint_id, "heartbeat_received", {"agent_version": payload.agent_version, "platform": payload.platform})
     return {"endpoint": endpoint, "server_time": datetime.now(timezone.utc).isoformat()}
 
 
@@ -1394,9 +1439,22 @@ def get_device_configuration(endpoint_id: str, request: Request) -> dict:
     }
 
 
+@app.get("/api/devices/{endpoint_id}/connectivity")
+def verify_device_connectivity(endpoint_id: str, request: Request) -> dict:
+    """Small authenticated check for desktop diagnostics and network validation."""
+    binding = _verify_device_auth(request, endpoint_id)
+    return {
+        "connected": True,
+        "endpoint_id": endpoint_id,
+        "organization_id": binding["organization_id"],
+        "server_time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/api/devices/{endpoint_id}/telemetry/batches")
 def ingest_device_telemetry_batch(endpoint_id: str, payload: DeviceTelemetryBatchRequest, request: Request) -> dict:
     binding = _verify_device_auth(request, endpoint_id)
+    _enforce_device_rate_limit(endpoint_id, 20)
     _resolve_topology(payload.topology)
     raw_events = [event.model_dump() for event in payload.events]
     if len(json.dumps(raw_events, allow_nan=False).encode("utf-8")) > 512 * 1024:
@@ -1410,6 +1468,7 @@ def ingest_device_telemetry_batch(endpoint_id: str, payload: DeviceTelemetryBatc
     normalized = normalize_events(raw_events, payload.topology)
     inserted = store_telemetry_events(payload.topology, normalized, binding["organization_id"])
     record_agent_audit(binding["organization_id"], endpoint_id, "telemetry_batch_received", {"batch_id": payload.batch_id, "events": len(raw_events), "inserted": inserted})
+    purge_expired_agent_data(int(os.getenv("ONYX_RAW_TELEMETRY_RETENTION_DAYS") or "7"))
     return {"accepted": True, "duplicate": False, "inserted": inserted, "batch_id": payload.batch_id}
 
 
@@ -1934,7 +1993,7 @@ def telemetry_events(
 
 @app.post("/api/incidents/{incident_id}/resolve")
 def resolve_endpoint_incident(incident_id: str, payload: IncidentResolutionRequest, request: Request) -> dict:
-    _verify_response_auth(request)
+    _verify_incident_resolution_auth(request)
     incident = resolve_incident(incident_id, payload.resolved_by, payload.reason)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -2246,6 +2305,24 @@ def health() -> dict:
             "response_controls_default": "disabled",
         },
     }
+
+
+@app.get("/api/health/live")
+def health_live() -> dict:
+    """Process liveness probe. It deliberately performs no expensive work."""
+    return {"status": "alive", "server_time": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/health/ready")
+def health_ready() -> dict:
+    """Readiness probe used by the HTTPS reverse proxy and deployment checks."""
+    import sqlite3
+    try:
+        with sqlite3.connect(database_store.DB_PATH, timeout=2) as connection:
+            connection.execute("SELECT 1").fetchone()
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=503, detail=f"Database is unavailable: {exc}") from exc
+    return {"status": "ready", "database": "available", "server_time": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/capabilities")

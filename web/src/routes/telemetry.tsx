@@ -65,6 +65,7 @@ function Telemetry() {
   const capabilities = useCapabilities();
   const responseControlsEnabled = capabilities.data?.response_controls === true;
   const allowedToRespond = can.respondToEndpoint(role) && responseControlsEnabled;
+  const allowedToResolve = can.respondToEndpoint(role);
   const [live, setLive] = useState(true);
   const [topology, setTopology] = useState("enterprise_20n");
   const [responseKey, setResponseKey] = useState("");
@@ -232,8 +233,14 @@ function Telemetry() {
               </p>
             )}
             {[...endpoints]
-              .sort(
-                (a, b) =>
+              .sort((a, b) => {
+                // Keep currently reporting devices ahead of historical/offline
+                // records so the operator sees the live fleet first.
+                const connectionOrder =
+                  Number(b.status === "active") - Number(a.status === "active");
+                if (connectionOrder !== 0) return connectionOrder;
+
+                return (
                   Number(
                     ["warning", "compromised", "critical", "affected"].includes(
                       b.security_state ?? "",
@@ -243,8 +250,9 @@ function Telemetry() {
                     ["warning", "compromised", "critical", "affected"].includes(
                       a.security_state ?? "",
                     ),
-                  ),
-              )
+                  )
+                );
+              })
               .map((endpoint) => {
                 const actionPending =
                   endpoint.latest_command &&
@@ -262,7 +270,15 @@ function Telemetry() {
                           {endpoint.endpoint_id}
                         </p>
                       </div>
-                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${endpointTone(endpoint)}`} />
+                      <span
+                        className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                          endpoint.status === "active"
+                            ? "bg-success/15 text-success"
+                            : "bg-tile-muted text-muted-foreground"
+                        }`}
+                      >
+                        {endpoint.status}
+                      </span>
                     </div>
                     <dl className="mt-4 space-y-1.5 text-[12px] text-muted-foreground">
                       <div className="flex justify-between">
@@ -309,7 +325,12 @@ function Telemetry() {
                         </p>
                         <p>{endpoint.latest_incident.summary}</p>
                         <button
-                          disabled={!allowedToRespond || resolveIncident.isPending}
+                          disabled={
+                            !allowedToResolve ||
+                            !responseKey.trim() ||
+                            reason.trim().length < 3 ||
+                            resolveIncident.isPending
+                          }
                           onClick={() =>
                             resolveIncident.mutate({
                               incidentId: endpoint.latest_incident!.incident_id,

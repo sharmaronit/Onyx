@@ -11,6 +11,7 @@ from . import __version__
 from .http import ApiClient, ApiError
 from .logging import JsonLogger
 from .queue import EncryptedQueue
+from .status import update_status
 
 
 class AgentRunner:
@@ -23,6 +24,8 @@ class AgentRunner:
         self.client = ApiClient(config["server_url"], config["device_credential"])
 
     def run_once(self) -> None:
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        update_status(self.data_dir, last_attempt_at=attempted_at, last_error=None)
         state = self._state(); system = platform.system()
         if system == "Windows":
             from .collectors.windows import collect
@@ -34,8 +37,13 @@ class AgentRunner:
             events, health = [], {"collector": "unsupported"}
         self._save_state(state)
         heartbeat = {"endpoint_id": self.config["endpoint_id"], "hostname": socket.gethostname(), "ip_address": self._ip_address(), "topology": self.config.get("topology", "enterprise_20n"), "agent_version": __version__, "platform": system, "metadata": {"collector_health": health, "queue": {"pending_batches": len(self.queue.batches())}, "response_controls_enabled": False}}
+        update_status(self.data_dir, collector_health=health, pending_batches=len(self.queue.batches()))
         try: self.client.request("POST", "/api/endpoints/heartbeat", heartbeat)
-        except ApiError as exc: self.log.write("error", "heartbeat_failed", status=exc.status, detail=str(exc)); return
+        except ApiError as exc:
+            self.log.write("error", "heartbeat_failed", status=exc.status, detail=str(exc))
+            update_status(self.data_dir, last_error=str(exc)[:500])
+            return
+        update_status(self.data_dir, last_connected_at=datetime.now(timezone.utc).isoformat(), last_error=None)
         for index in range(0, len(events), 100):
             batch = {"batch_id": str(uuid.uuid4()), "topology": self.config.get("topology", "enterprise_20n"), "events": events[index:index + 100], "created_at": datetime.now(timezone.utc).isoformat()}
             removed = self.queue.put(batch)
@@ -44,6 +52,7 @@ class AgentRunner:
             try:
                 self.client.request("POST", f"/api/devices/{self.config['endpoint_id']}/telemetry/batches", {k: batch[k] for k in ("batch_id", "topology", "events")})
                 self.queue.acknowledge(batch["batch_id"])
+                update_status(self.data_dir, pending_batches=len(self.queue.batches()))
             except ApiError as exc:
                 self.log.write("error", "telemetry_retry_scheduled", status=exc.status, detail=str(exc)); break
 

@@ -21,10 +21,17 @@ class AgentInstallLifecycleTests(unittest.TestCase):
         ), self.assertRaises(PermissionError):
             cli.require_administrator()
 
-    def test_macos_installer_waits_for_enrollment_before_loading_daemon(self):
+    def test_macos_installer_starts_idle_daemon_for_desktop_enrollment(self):
         script = Path("agent/packaging/macos/scripts/postinstall").read_text(encoding="utf-8")
-        self.assertNotIn("launchctl bootstrap", script)
-        self.assertIn("onyx-agent enroll", script)
+        self.assertIn("launchctl bootstrap", script)
+        self.assertIn("Open Onyx Agent", script)
+
+    def test_windows_installer_starts_idle_service_and_includes_desktop(self):
+        wix = Path("agent/packaging/windows/OnyxAgent.wxs").read_text(encoding="utf-8")
+        self.assertIn('Start="install"', wix)
+        self.assertIn("OnyxDesktopExe", wix)
+        self.assertIn("LaunchOnyxDesktop", wix)
+        self.assertIn("Windows\\CurrentVersion\\Run", wix)
 
 
 if __name__ == "__main__":

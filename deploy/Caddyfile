@@ -1,0 +1,12 @@
+{$ONYX_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy api:8020
+  request_body { max_size 2MB }
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    -Server
+  }
+  log { output stdout format json }
+}

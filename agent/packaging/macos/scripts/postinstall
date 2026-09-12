@@ -18,5 +18,7 @@ chmod 644 "$PLIST"
 mkdir -p /usr/local/bin
 ln -sf "$AGENT_DIR/OnyxAgent" /usr/local/bin/onyx-agent
 launchctl bootout system/com.onyx.endpoint-agent 2>/dev/null || true
-echo "Onyx Agent installed. Run: sudo onyx-agent enroll"
+launchctl bootstrap system "$PLIST"
+launchctl kickstart -k system/com.onyx.endpoint-agent
+echo "Onyx Agent installed. Open Onyx Agent from Applications to enroll this laptop."
 exit 0

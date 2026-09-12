@@ -8,8 +8,8 @@ Onyx is a cybersecurity research platform and prototype console that helps secur
 
 The current development installers are available directly from GitHub Releases:
 
-- [Download Windows 10/11 x64 MSI](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.2-windows-x64.msi)
-- [Download universal macOS DMG](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.2-macos-universal.dmg)
+- [Download Windows 10/11 x64 MSI](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.1.0-windows-x64.msi)
+- [Download universal macOS DMG](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.1.0-macos-universal.dmg)
 - [View installer checksums and all release files](https://github.com/sharmaronit/Onyx/releases/latest)
 
 These packages are unsigned development builds for owned test laptops. Employee deployment requires Windows code signing and Apple Developer ID signing and notarization.
@@ -43,6 +43,7 @@ Enroll or import evidence → map assets and relationships → review findings
 - Provenance, freshness, confidence, replay, and evidence-bundle fields
 - FastAPI backend with SQLite persistence
 - React, TanStack Start, Vite, TypeScript, and Tailwind console
+- Tauri and React desktop companion with local service IPC and system-tray status
 - Streamlit research/demo application
 
 The maintained console is in `web/`. `web_backup/` and `Security Sentinel/` are historical or alternate frontend copies.
@@ -90,6 +91,9 @@ The research path adds a Graph Neural Network world model and reinforcement-lear
 | `src/analysis/` | Path analysis, patch ranking, cost model, reports |
 | `src/integrations/` | Telemetry clients, mapping, and storage |
 | `web/` | React/TanStack console and FastAPI backend |
+| `desktop/` | Cross-platform Tauri enrollment and endpoint-status app |
+| `agent/` | Privileged Windows Service / macOS LaunchDaemon and installers |
+| `deploy/` | Caddy HTTPS and container deployment for a single-customer pilot |
 | `demo/` | Streamlit research/demo application |
 | `data/topologies/` | Small sanitized example topologies |
 | `data/cve/` | Explicitly synthetic `SYNTH-ONYX-*` training fixtures |

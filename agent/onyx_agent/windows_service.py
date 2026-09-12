@@ -6,8 +6,7 @@ import win32service
 import win32serviceutil
 import servicemanager
 
-from .credentials import CredentialStore
-from .runtime import AgentRunner
+from .host import run_agent_host
 from .__main__ import data_dir
 
 
@@ -20,19 +19,18 @@ class OnyxEndpointAgentService(win32serviceutil.ServiceFramework):
         super().__init__(args)
         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
         self.worker = None
+        self.worker_stop = threading.Event()
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        self.worker_stop.set()
         win32event.SetEvent(self.stop_event)
 
     def SvcDoRun(self):
-        config = CredentialStore(data_dir()).load()
-        if not config:
-            return
-        runner = AgentRunner(config, data_dir())
-        self.worker = threading.Thread(target=runner.run_forever, daemon=True)
+        self.worker = threading.Thread(target=run_agent_host, args=(data_dir(), self.worker_stop), daemon=True)
         self.worker.start()
         win32event.WaitForSingleObject(self.stop_event, win32event.INFINITE)
+        self.worker.join(timeout=10)
 
 
 def run_service() -> None:

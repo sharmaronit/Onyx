@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-VERSION="${1:-1.0.2}"
+VERSION="${1:-1.1.0}"
 if [[ "${ONYX_ALLOW_UNSIGNED_DEVELOPMENT_BUILD:-}" != "1" ]]; then echo "Set ONYX_ALLOW_UNSIGNED_DEVELOPMENT_BUILD=1 only on an owned development Mac." >&2; exit 2; fi
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; OUT="$ROOT/dist"; STAGE="$ROOT/build/macos-root"
 case "$(uname -m)" in arm64) ARCH="arm64";; x86_64) ARCH="x64";; *) echo "Unsupported Mac architecture" >&2; exit 2;; esac

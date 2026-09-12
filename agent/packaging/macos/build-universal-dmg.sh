@@ -1,20 +1,31 @@
 #!/bin/bash
 set -euo pipefail
-VERSION="${1:-1.0.2}"
+VERSION="${1:-1.1.0}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; OUT="$ROOT/dist"; STAGE="$ROOT/build/macos-root"
 ARM="$ROOT/packaging/macos/artifacts/OnyxAgent-arm64"; X64="$ROOT/packaging/macos/artifacts/OnyxAgent-x64"
-test -f "$ARM" && test -f "$X64" || { echo "Both Intel and Apple Silicon binaries are required." >&2; exit 2; }
+DESKTOP_ARM="$ROOT/packaging/macos/artifacts/OnyxDesktop-arm64"; DESKTOP_X64="$ROOT/packaging/macos/artifacts/OnyxDesktop-x64"
+test -f "$ARM" && test -f "$X64" && test -f "$DESKTOP_ARM" && test -f "$DESKTOP_X64" || { echo "Both agent and desktop binaries for Intel and Apple Silicon are required." >&2; exit 2; }
 SIGNED=0
 if [[ -n "${APPLE_APPLICATION_IDENTITY:-}" && -n "${APPLE_INSTALLER_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$ARM"
   codesign --force --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$X64"
+  codesign --force --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$DESKTOP_ARM"
+  codesign --force --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$DESKTOP_X64"
   SIGNED=1
 fi
-rm -rf "$STAGE"; mkdir -p "$STAGE/Library/Application Support/Onyx/bin" "$STAGE/Library/LaunchDaemons" "$OUT"
+rm -rf "$STAGE"; mkdir -p "$STAGE/Library/Application Support/Onyx/bin" "$STAGE/Library/LaunchDaemons" "$STAGE/Applications/Onyx Agent.app/Contents/MacOS" "$OUT"
 cp "$ARM" "$STAGE/Library/Application Support/Onyx/bin/OnyxAgent-arm64"
 cp "$X64" "$STAGE/Library/Application Support/Onyx/bin/OnyxAgent-x64"
 chmod 755 "$STAGE/Library/Application Support/Onyx/bin/OnyxAgent-"*
 cp "$ROOT/packaging/macos/com.onyx.endpoint-agent.plist" "$STAGE/Library/LaunchDaemons/"
+lipo -create "$DESKTOP_ARM" "$DESKTOP_X64" -output "$STAGE/Applications/Onyx Agent.app/Contents/MacOS/onyx-desktop"
+chmod 755 "$STAGE/Applications/Onyx Agent.app/Contents/MacOS/onyx-desktop"
+cat > "$STAGE/Applications/Onyx Agent.app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleDisplayName</key><string>Onyx Agent</string><key>CFBundleExecutable</key><string>onyx-desktop</string><key>CFBundleIdentifier</key><string>com.onyx.endpoint-agent.desktop</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>$VERSION</string><key>LSMinimumSystemVersion</key><string>11.0</string></dict></plist>
+PLIST
+if [[ "$SIGNED" = "1" ]]; then codesign --force --deep --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$STAGE/Applications/Onyx Agent.app"; fi
 COMPONENT_PKG="$OUT/OnyxAgent-$VERSION-component.pkg"
 FINAL_PKG="$OUT/OnyxAgent-$VERSION-macos-universal.pkg"
 pkgbuild --root "$STAGE" --scripts "$ROOT/packaging/macos/scripts" --identifier com.onyx.endpoint-agent --version "$VERSION" --install-location / "$COMPONENT_PKG"

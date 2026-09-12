@@ -1,12 +1,13 @@
 """SQLite persistence layer for Onyx Web API."""
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-DB_PATH = Path(__file__).parent / "onyx.db"
+DB_PATH = Path(os.getenv("ONYX_DATABASE_PATH") or (Path(__file__).parent / "onyx.db"))
 
 
 def init_db() -> None:
@@ -471,7 +472,22 @@ def store_telemetry_events(topology: str, events: List[Dict[str, Any]], organiza
                 ),
             )
             inserted += cursor.rowcount
-    return inserted
+        return inserted
+
+
+def purge_expired_agent_data(retention_days: int = 7) -> Dict[str, int]:
+    """Apply the configured raw agent-data retention window."""
+    days = max(1, min(int(retention_days), 365))
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        telemetry = conn.execute(
+            "DELETE FROM telemetry_events WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        ).rowcount
+        batches = conn.execute(
+            "DELETE FROM agent_ingest_batches WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        ).rowcount
+        return {"telemetry_events": telemetry, "ingest_batches": batches}
 
 
 def get_telemetry_events(topology: str, limit: int = 500, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:

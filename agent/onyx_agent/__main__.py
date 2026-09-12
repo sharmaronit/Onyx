@@ -3,21 +3,18 @@ import getpass
 import os
 import platform
 import subprocess
-import uuid
 from pathlib import Path
 
 from .credentials import CredentialStore
 from .http import ApiClient, ApiError
 from .queue import new_queue_key
 from .runtime import AgentRunner
+from .enrollment import perform_enrollment, platform_name
+from .host import run_agent_host
 
 
 def data_dir() -> Path:
     return Path(r"C:\ProgramData\Onyx" if platform.system() == "Windows" else "/Library/Application Support/Onyx")
-
-
-def platform_name() -> str:
-    return "macOS" if platform.system() == "Darwin" else platform.system()
 
 
 def require_administrator() -> None:
@@ -35,12 +32,10 @@ def enroll(args: argparse.Namespace) -> int:
     if not server_url:
         raise ValueError("Backend URL is required")
     token = getpass.getpass("One-use enrollment token: ")
-    endpoint_id = str(uuid.uuid4())
     try:
-        response = ApiClient(server_url).request("POST", "/api/device-enrollment/exchange", {"enrollment_token": token, "endpoint_id": endpoint_id, "platform": platform_name()})
+        response = perform_enrollment(data_dir(), server_url, token, args.topology)
     finally:
         token = ""  # Do not keep enrollment secrets after exchange.
-    CredentialStore(data_dir()).save({"server_url": server_url, "endpoint_id": endpoint_id, "organization_id": response["organization_id"], "device_credential": response["device_credential"], "queue_key": new_queue_key(), "topology": args.topology})
     if platform.system() == "Windows":
         started = subprocess.run(["sc.exe", "start", "OnyxEndpointAgent"], capture_output=True, text=True)
         if started.returncode != 0 and "already running" not in (started.stdout + started.stderr).lower():
@@ -51,7 +46,7 @@ def enroll(args: argparse.Namespace) -> int:
         if loaded.returncode != 0:
             raise RuntimeError(f"Enrollment succeeded but LaunchDaemon loading failed: {loaded.stderr.strip()}")
         subprocess.run(["/bin/launchctl", "kickstart", "-k", "system/com.onyx.endpoint-agent"], check=False, capture_output=True)
-    print(f"Enrolled endpoint {endpoint_id} in organization {response['organization_id']}")
+    print(f"Enrolled endpoint {response['endpoint_id']} in organization {response['organization_id']}")
     return 0
 
 
@@ -64,10 +59,11 @@ def status(_: argparse.Namespace) -> int:
 
 def run(args: argparse.Namespace) -> int:
     config = CredentialStore(data_dir()).load()
-    if not config: print("Agent is not enrolled", flush=True); return 2
-    runner = AgentRunner(config, data_dir())
-    if args.once: runner.run_once()
-    else: runner.run_forever()
+    if args.once:
+        if not config: print("Agent is not enrolled", flush=True); return 2
+        AgentRunner(config, data_dir()).run_once()
+    else:
+        run_agent_host(data_dir())
     return 0
 
 

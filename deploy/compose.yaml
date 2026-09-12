@@ -1,0 +1,41 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      ONYX_ADMIN_API_KEY: ${ONYX_ADMIN_API_KEY:?set ONYX_ADMIN_API_KEY}
+      ONYX_RESPONSE_API_KEY: ${ONYX_RESPONSE_API_KEY:-}
+      ONYX_ORGANIZATION_ID: ${ONYX_ORGANIZATION_ID:?set ONYX_ORGANIZATION_ID}
+      ONYX_RESPONSE_CONTROLS_ENABLED: "false"
+      ONYX_DATABASE_PATH: /var/lib/onyx/onyx.db
+      ONYX_RAW_TELEMETRY_RETENTION_DAYS: "7"
+    volumes: ["onyx_data:/var/lib/onyx"]
+    expose: ["8020"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/api/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [private]
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      api: {condition: service_healthy}
+    environment:
+      ONYX_DOMAIN: ${ONYX_DOMAIN:?set ONYX_DOMAIN}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [private]
+networks:
+  private: {}
+volumes:
+  onyx_data: {}
+  caddy_data: {}
+  caddy_config: {}
