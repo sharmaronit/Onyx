@@ -7,17 +7,20 @@
       <Directory Id="INSTALLFOLDER" Name="Onyx">
         <Component Id="AgentExecutable" Guid="*" Bitness="always64">
           <File Id="OnyxAgentExe" Source="$(var.AgentExe)" KeyPath="yes" />
-          <File Id="OnyxDesktopExe" Source="$(var.DesktopExe)">
+          <ServiceInstall Id="OnyxService" Name="OnyxEndpointAgent" DisplayName="Onyx Endpoint Agent" Description="Collects configured Onyx endpoint security telemetry over HTTPS." Start="auto" Type="ownProcess" Account="LocalSystem" ErrorControl="normal" Arguments="service" />
+          <ServiceControl Id="OnyxServiceControl" Name="OnyxEndpointAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="DesktopExecutable" Guid="*" Bitness="always64">
+          <File Id="OnyxDesktopExe" Source="$(var.DesktopExe)" KeyPath="yes">
             <Shortcut Id="OnyxDesktopStartMenu" Directory="ProgramMenuFolder" Name="Onyx Agent" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
           </File>
           <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="OnyxAgent" Type="string" Value="&quot;[#OnyxDesktopExe]&quot;" />
-          <ServiceInstall Id="OnyxService" Name="OnyxEndpointAgent" DisplayName="Onyx Endpoint Agent" Description="Collects configured Onyx endpoint security telemetry over HTTPS." Start="auto" Type="ownProcess" Account="LocalSystem" ErrorControl="normal" Arguments="service" />
-          <ServiceControl Id="OnyxServiceControl" Name="OnyxEndpointAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
     <Feature Id="Main" Title="Onyx Endpoint Agent" Level="1">
       <ComponentRef Id="AgentExecutable" />
+      <ComponentRef Id="DesktopExecutable" />
     </Feature>
     <CustomAction Id="LaunchOnyxDesktop" FileRef="OnyxDesktopExe" ExeCommand="" Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
     <InstallExecuteSequence>
