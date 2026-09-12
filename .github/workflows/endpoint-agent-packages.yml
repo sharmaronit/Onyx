@@ -175,3 +175,21 @@ jobs:
           make_latest: true
           generate_release_notes: false
           files: installers/**
+
+  windows-development-release:
+    needs: windows-msi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OnyxAgent-windows-x64
+          path: installers
+      - name: Publish Windows development installer
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: agent-v${{ inputs.version || '1.1.0' }}-windows
+          name: Onyx Agent ${{ inputs.version || '1.1.0' }} Windows installer
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          files: installers/**
