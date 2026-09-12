@@ -59,6 +59,9 @@ def main() -> int:
     status_p = sub.add_parser("status"); status_p.set_defaults(func=status)
     run_p = sub.add_parser("run"); run_p.add_argument("--once", action="store_true"); run_p.set_defaults(func=run)
     rotate_p = sub.add_parser("rotate-credential"); rotate_p.add_argument("--reason", default="administrator_requested"); rotate_p.set_defaults(func=rotate)
+    if platform.system() == "Windows":
+        service_p = sub.add_parser("service")
+        service_p.set_defaults(func=lambda _: __import__("onyx_agent.windows_service", fromlist=["run_service"]).run_service() or 0)
     try: return args.func(args)
     except (ApiError, OSError, ValueError) as exc: print(f"Onyx Agent error: {exc}"); return 1
 
