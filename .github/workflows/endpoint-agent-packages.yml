@@ -1,5 +1,8 @@
 name: Build Onyx endpoint-agent installers
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -36,7 +39,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-13
+          - runner: macos-15-intel
             arch: x64
           - runner: macos-14
             arch: arm64
@@ -68,3 +71,20 @@ jobs:
         with:
           name: OnyxAgent-macos-universal
           path: agent/dist/OnyxAgent-*-macos-universal.*
+
+  development-release:
+    needs: [windows-msi, macos-universal-dmg]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Publish development installers to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: agent-v${{ inputs.version || '1.0.0' }}-dev
+          name: Onyx Agent ${{ inputs.version || '1.0.0' }} development installers
+          prerelease: true
+          generate_release_notes: false
+          files: installers/**

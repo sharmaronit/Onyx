@@ -6,5 +6,5 @@ case "$ARCH" in x64) RUNNER_ARCH="x86_64";; arm64) RUNNER_ARCH="arm64";; *) echo
 mkdir -p "$ROOT/dist"
 python3 -m pip install -r "$ROOT/requirements.txt"
 cd "$ROOT"
-python3 -m PyInstaller --clean --noconfirm --onefile --name "OnyxAgent-$ARCH" onyx_agent/__main__.py
+python3 -m PyInstaller --clean --noconfirm --onefile --name "OnyxAgent-$ARCH" onyx_agent_entry.py
 test "$(uname -m)" = "$RUNNER_ARCH" || { echo "Build this binary on a $RUNNER_ARCH Mac runner." >&2; exit 2; }
