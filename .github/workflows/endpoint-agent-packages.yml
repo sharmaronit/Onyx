@@ -1,0 +1,41 @@
+name: Build Onyx endpoint-agent installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to package
+        required: true
+        default: 1.0.0
+  push:
+    branches: [main]
+    paths: [agent/**, .github/workflows/endpoint-agent-packages.yml]
+
+jobs:
+  windows-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install WiX and agent dependencies
+        shell: powershell
+        run: |
+          dotnet tool install --global wix --version 5.*
+          python -m pip install -r agent/requirements.txt
+      - name: Build unsigned development MSI
+        shell: powershell
+        run: agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.0.0' }}' -AllowUnsignedDevelopmentBuild
+      - uses: actions/upload-artifact@v4
+        with: {name: OnyxAgent-windows-x64; path: agent/dist/OnyxAgent-*-windows-x64.*}
+
+  macos-dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Build unsigned development DMG
+        run: ONYX_ALLOW_UNSIGNED_DEVELOPMENT_BUILD=1 bash agent/packaging/macos/build-package.sh '${{ inputs.version || '1.0.0' }}'
+      - uses: actions/upload-artifact@v4
+        with: {name: OnyxAgent-macos-arm64; path: agent/dist/OnyxAgent-*-macos.*}

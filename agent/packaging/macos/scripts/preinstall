@@ -1,0 +1,3 @@
+#!/bin/bash
+launchctl bootout system/com.onyx.endpoint-agent 2>/dev/null || true
+exit 0
