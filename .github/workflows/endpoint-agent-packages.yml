@@ -98,7 +98,9 @@ jobs:
         working-directory: desktop
         run: cargo build --release --manifest-path src-tauri/Cargo.toml
       - name: Stage native desktop companion
-        run: cp "desktop/src-tauri/target/release/onyx-desktop" "agent/dist/OnyxDesktop-${{ matrix.arch }}"
+        run: |
+          mkdir -p agent/dist
+          cp "desktop/src-tauri/target/release/onyx-desktop" "agent/dist/OnyxDesktop-${{ matrix.arch }}"
       - name: Build native macOS agent binary
         run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
       - name: Generate native software bills of materials
