@@ -1,5 +1,7 @@
 # Installing the Onyx Endpoint Agent
 
+The Windows MSI fix is included in the current `main` branch. If GitHub still shows an older tree, refresh the page and select `main` from the branch menu.
+
 Onyx Agent includes a desktop status application and a privileged background service. The service starts in an idle state after installation so the desktop application can enroll the laptop without receiving or reading its device credential.
 
 ## Windows 10/11 x64
