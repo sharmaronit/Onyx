@@ -15,7 +15,8 @@ chmod 700 "$AGENT_DIR"
 chmod 755 "$AGENT_DIR/OnyxAgent"
 chown root:wheel "$PLIST"
 chmod 644 "$PLIST"
+mkdir -p /usr/local/bin
 ln -sf "$AGENT_DIR/OnyxAgent" /usr/local/bin/onyx-agent
 launchctl bootout system/com.onyx.endpoint-agent 2>/dev/null || true
-launchctl bootstrap system "$PLIST"
+echo "Onyx Agent installed. Run: sudo onyx-agent enroll"
 exit 0

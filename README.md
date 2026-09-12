@@ -8,11 +8,13 @@ Onyx is a cybersecurity research platform and prototype console that helps secur
 
 The current development installers are available directly from GitHub Releases:
 
-- [Download Windows 10/11 x64 MSI](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.1-windows-x64.msi)
-- [Download universal macOS DMG](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.1-macos-universal.dmg)
+- [Download Windows 10/11 x64 MSI](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.2-windows-x64.msi)
+- [Download universal macOS DMG](https://github.com/sharmaronit/Onyx/releases/latest/download/OnyxAgent-1.0.2-macos-universal.dmg)
 - [View installer checksums and all release files](https://github.com/sharmaronit/Onyx/releases/latest)
 
 These packages are unsigned development builds for owned test laptops. Employee deployment requires Windows code signing and Apple Developer ID signing and notarization.
+
+See [endpoint agent installation and signing](docs/INSTALL_ENDPOINT_AGENT.md) for enrollment, service verification, and production signing requirements.
 
 > **Prototype status:** Onyx is suitable for lab evaluation, demonstrations, and supervised design-partner pilots. It is not currently a replacement for antivirus, MDM, EDR, penetration testing, or a 24/7 SOC. Simulation output is modelled evidence, not a probability of a real breach.
 

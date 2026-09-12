@@ -19,7 +19,7 @@ class CredentialStore:
     def save(self, value: Dict[str, Any]) -> None:
         raw = json.dumps(value, allow_nan=False).encode("utf-8")
         if platform.system() == "Darwin":
-            subprocess.run(["/usr/bin/security", "add-generic-password", "-U", "-s", SERVICE_NAME, "-a", "root", "-w", "-"], input=raw, check=True)
+            self._mac_save(raw)
             return
         if platform.system() == "Windows":
             self._write_windows(self._protect_windows(raw)); return
@@ -28,8 +28,7 @@ class CredentialStore:
     def load(self) -> Optional[Dict[str, Any]]:
         try:
             if platform.system() == "Darwin":
-                result = subprocess.run(["/usr/bin/security", "find-generic-password", "-s", SERVICE_NAME, "-a", "root", "-w"], capture_output=True, check=True)
-                return json.loads(result.stdout.decode("utf-8"))
+                return json.loads(self._mac_load().decode("utf-8"))
             if platform.system() == "Windows":
                 return json.loads(self._unprotect_windows(self._read_windows()).decode("utf-8"))
         except (FileNotFoundError, subprocess.CalledProcessError, OSError, ValueError):
@@ -41,6 +40,56 @@ class CredentialStore:
             subprocess.run(["/usr/bin/security", "delete-generic-password", "-s", SERVICE_NAME, "-a", "root"], check=False, capture_output=True)
         elif platform.system() == "Windows":
             self._credential_file().unlink(missing_ok=True)
+
+    @staticmethod
+    def _mac_security():
+        security = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Security.framework/Security")
+        pointer = ctypes.c_void_p
+        security.SecKeychainOpen.argtypes = [ctypes.c_char_p, ctypes.POINTER(pointer)]
+        security.SecKeychainOpen.restype = ctypes.c_int32
+        security.SecKeychainAddGenericPassword.argtypes = [pointer, ctypes.c_uint32, pointer, ctypes.c_uint32, pointer, ctypes.c_uint32, pointer, ctypes.POINTER(pointer)]
+        security.SecKeychainAddGenericPassword.restype = ctypes.c_int32
+        security.SecKeychainFindGenericPassword.argtypes = [pointer, ctypes.c_uint32, pointer, ctypes.c_uint32, pointer, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
+        security.SecKeychainFindGenericPassword.restype = ctypes.c_int32
+        security.SecKeychainItemModifyAttributesAndData.argtypes = [pointer, pointer, ctypes.c_uint32, pointer]
+        security.SecKeychainItemModifyAttributesAndData.restype = ctypes.c_int32
+        security.SecKeychainItemFreeContent.argtypes = [pointer, pointer]
+        security.SecKeychainItemFreeContent.restype = ctypes.c_int32
+        return security
+
+    @classmethod
+    def _mac_open_system_keychain(cls):
+        security = cls._mac_security()
+        keychain = ctypes.c_void_p()
+        status = security.SecKeychainOpen(b"/Library/Keychains/System.keychain", ctypes.byref(keychain))
+        if status != 0:
+            raise OSError(f"Unable to open macOS System Keychain (OSStatus {status})")
+        return security, keychain
+
+    @classmethod
+    def _mac_save(cls, raw: bytes) -> None:
+        security, keychain = cls._mac_open_system_keychain()
+        service, account, item = SERVICE_NAME.encode(), b"root", ctypes.c_void_p()
+        status = security.SecKeychainFindGenericPassword(keychain, len(service), ctypes.c_char_p(service), len(account), ctypes.c_char_p(account), None, None, ctypes.byref(item))
+        if status == 0:
+            status = security.SecKeychainItemModifyAttributesAndData(item, None, len(raw), ctypes.c_char_p(raw))
+        elif status == -25300:
+            status = security.SecKeychainAddGenericPassword(keychain, len(service), ctypes.c_char_p(service), len(account), ctypes.c_char_p(account), len(raw), ctypes.c_char_p(raw), ctypes.byref(item))
+        if status != 0:
+            raise OSError(f"Unable to store device credential in System Keychain (OSStatus {status})")
+
+    @classmethod
+    def _mac_load(cls) -> bytes:
+        security, keychain = cls._mac_open_system_keychain()
+        service, account = SERVICE_NAME.encode(), b"root"
+        length, data, item = ctypes.c_uint32(), ctypes.c_void_p(), ctypes.c_void_p()
+        status = security.SecKeychainFindGenericPassword(keychain, len(service), ctypes.c_char_p(service), len(account), ctypes.c_char_p(account), ctypes.byref(length), ctypes.byref(data), ctypes.byref(item))
+        if status != 0:
+            raise OSError(f"Device credential not found in System Keychain (OSStatus {status})")
+        try:
+            return ctypes.string_at(data, length.value)
+        finally:
+            security.SecKeychainItemFreeContent(None, data)
 
     def _credential_file(self) -> Path:
         self.data_dir.mkdir(parents=True, exist_ok=True)

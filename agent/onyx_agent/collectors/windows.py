@@ -1,4 +1,5 @@
 import json
+import ctypes
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -6,6 +7,9 @@ from typing import Any, Dict, List
 
 def collect(last_record_id: int) -> tuple[List[Dict[str, Any]], Dict[str, Any], int]:
     """Read Defender Operational 1116/1117 only; no Defender settings are changed."""
+    # A frozen PyInstaller process changes the DLL search directory. Restore the
+    # Windows default before launching the system PowerShell collector.
+    ctypes.windll.kernel32.SetDllDirectoryW(None)
     command = "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Windows Defender/Operational'; Id=1116,1117} | Select-Object RecordId,Id,TimeCreated,Message | ConvertTo-Json -Compress"
     try:
         result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=30, check=True)
