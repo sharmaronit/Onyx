@@ -85,14 +85,20 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build native desktop companion
+      - name: Install desktop dependencies
         working-directory: desktop
-        run: |
-          npm ci
-          npm run tauri icon public/onyx-icon.svg
-          npm run build
-          cargo build --release --manifest-path src-tauri/Cargo.toml
-          cp "src-tauri/target/release/onyx-desktop" "../agent/dist/OnyxDesktop-${{ matrix.arch }}"
+        run: npm ci
+      - name: Generate desktop icons
+        working-directory: desktop
+        run: npm run tauri icon public/onyx-icon.svg
+      - name: Build desktop frontend
+        working-directory: desktop
+        run: npm run build
+      - name: Compile native desktop companion
+        working-directory: desktop
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+      - name: Stage native desktop companion
+        run: cp "desktop/src-tauri/target/release/onyx-desktop" "agent/dist/OnyxDesktop-${{ matrix.arch }}"
       - name: Build native macOS agent binary
         run: bash agent/packaging/macos/build-binary.sh '${{ matrix.arch }}'
       - name: Generate native software bills of materials
