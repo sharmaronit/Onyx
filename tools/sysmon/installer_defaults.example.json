@@ -1,0 +1,16 @@
+{
+  "ingest_url": "https://YOUR-SERVER-DOMAIN/api/telemetry/ingest",
+  "api_key": "",
+  "topology": "enterprise_20n",
+  "source": "sysmon_forwarder",
+  "source_node": "",
+  "target_node": "node_05_app",
+  "poll_seconds": 5,
+  "batch_size": 25,
+  "protected_ports": "22,80,443,445,3389,5432",
+  "install_python_if_missing": true,
+  "install_sysmon": true,
+  "start_task": true,
+  "skip_task_registration": false,
+  "skip_dependency_install": false
+}

@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.onyx-secrets.cmd
+tools/endpoint_heartbeat/dist/
+.venv
+.runtime-python310/
+venv/
+ENV/
+
+# JavaScript dependencies and build output
+node_modules/
+web/node_modules/
+web_backup/node_modules/
+Security Sentinel/node_modules/
+.output/
+.tanstack/
+.wrangler/
+
+# Local runtime state and generated artifacts
+web/backend/*.db
+web/backend/*.db-*
+reports/
+logs/
+checkpoints/
+*.zip
+*.pptx
+*.webp
+*.png
+ref_render/
+.codex-finalizer/
+.extract-design-system/
+.onyx-deck-build/
+.onyx-git/
+
+# Project specific
+checkpoints/
+logs/
+data/
+reports/
+*.log
+
+# VS Code
+.vscode/
+
+# Keep small, sanitized source fixtures; exclude generated episode/runtime data.
+!data/
+!data/topologies/
+!data/topologies/*.json
+!data/cve/
+!data/cve/*.json
+data/episodes/
+data/telemetry/
+tools/sysmon/internet_publish/
+tools/sysmon/bin/
+
+# OS specific
+.DS_Store
+Thumbs.db

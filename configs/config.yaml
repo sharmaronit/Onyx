@@ -1,0 +1,83 @@
+# Onyx Configuration
+
+project:
+  name: "Onyx"
+  seed: 42
+  device: "cuda"  # or "cpu"
+
+graph:
+  max_nodes: 50             # all obs padded to this
+  node_feat_dim: 11
+  node_feat_dim_with_action: 12
+  edge_feat_dim: 5
+  node_types: ["server", "workstation", "router", "firewall", "database", "cloud"]
+  connection_types: ["ssh", "http", "sql", "rdp", "ftp", "vpn"]
+
+simulator:
+  max_steps_per_episode: 50
+  num_training_episodes: 50000   # for GNN dataset generation
+  num_topology_variants: 100
+  small_topology_nodes: [8, 15]
+  medium_topology_nodes: [16, 25]
+  large_topology_nodes: [26, 40]
+
+gnn:
+  hidden_dim: 64
+  num_layers: 3
+  dropout: 0.1
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-5
+  epochs: 50
+  batch_size: 128
+  train_split: 0.80
+  val_split: 0.10
+  test_split: 0.10
+  target_val_auc: 0.87
+
+rl:
+  algorithm: "MaskablePPO"
+  policy: "MlpPolicy"
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  learning_rate: 3.0e-4
+  ent_coef: 0.01
+  clip_range: 0.2
+  gamma: 0.99
+  gae_lambda: 0.95
+  red_total_timesteps: 1000000
+  blue_total_timesteps: 1000000
+  marl_rounds: 5
+  marl_steps_per_round: 200000
+
+rewards:
+  red:
+    per_node_compromised: 1.0
+    critical_asset: 10.0
+    step_penalty: -0.1
+    invalid_action: -0.5
+  blue:
+    per_node_compromised: -1.0
+    prevented_critical: 10.0
+    step_penalty: -0.05
+
+patch_optimizer:
+  eval_episodes_baseline: 500
+  eval_episodes_per_patch: 100
+
+telemetry:
+  enabled: false
+  endpoint: ""
+  api_key_env: "TELEMETRY_API_KEY"
+  request_timeout_seconds: 8
+  cache_ttl_seconds: 3600
+  fallback_to_simulation: true
+  default_hybrid_telemetry_weight: 0.4
+
+paths:
+  topologies: "data/topologies"
+  cve_dataset: "data/cve/cve_dataset.json"
+  episodes: "data/episodes"
+  checkpoints: "checkpoints"
+  logs: "logs"
+  reports: "reports"

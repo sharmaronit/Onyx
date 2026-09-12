@@ -1,0 +1,19 @@
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256,md5</HashAlgorithms>
+  <EventFiltering>
+    <ProcessCreate onmatch="include">
+      <Image condition="is not">C:\Windows\System32\svchost.exe</Image>
+    </ProcessCreate>
+
+    <NetworkConnect onmatch="include" />
+
+    <FileCreate onmatch="include" />
+
+    <RegistryEvent onmatch="include">
+      <TargetObject condition="contains">Software\Microsoft\Windows\CurrentVersion\Run</TargetObject>
+      <TargetObject condition="contains">Software\Microsoft\Windows\CurrentVersion\RunOnce</TargetObject>
+    </RegistryEvent>
+
+    <DnsQuery onmatch="include" />
+  </EventFiltering>
+</Sysmon>

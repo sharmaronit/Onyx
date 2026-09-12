@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Onyx Network Topology",
+  "type": "object",
+  "required": ["name", "nodes", "edges"],
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "node_type", "software", "version"],
+        "properties": {
+          "node_id": { "type": "string" },
+          "node_type": { "type": "string", "enum": ["server", "workstation", "router", "firewall", "database", "cloud"] },
+          "software": { "type": "string" },
+          "version": { "type": "string" },
+          "is_critical_asset": { "type": "boolean", "default": false },
+          "is_entry_point": { "type": "boolean", "default": false },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "connection_type"],
+        "properties": {
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "connection_type": { "type": "string", "enum": ["ssh", "http", "sql", "rdp", "ftp", "vpn"] },
+          "has_firewall": { "type": "boolean", "default": false },
+          "permission_level": { "type": "string", "enum": ["read", "write", "admin"], "default": "read" }
+        }
+      }
+    }
+  }
+}

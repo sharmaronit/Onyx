@@ -1,0 +1,31 @@
+{
+  "scenarios": [
+    {
+      "id": "ransomware-lateral",
+      "name": "Ransomware Lateral Movement",
+      "topology": "enterprise_20n",
+      "seed": 77,
+      "data_source": "hybrid",
+      "description": "Attacker enters through exposed workstation and moves toward critical finance assets.",
+      "goal": "Demonstrate how top patches cut breach probability."
+    },
+    {
+      "id": "cloud-pivot",
+      "name": "Cloud Pivot Escalation",
+      "topology": "cloud_hybrid_30n",
+      "seed": 103,
+      "data_source": "hybrid",
+      "description": "Attacker pivots from internet-facing service into hybrid cloud core.",
+      "goal": "Show edge hot-spots and replay path before mitigation."
+    },
+    {
+      "id": "small-office-fast",
+      "name": "Small Office Fast Breach",
+      "topology": "small_office_10n",
+      "seed": 21,
+      "data_source": "simulation",
+      "description": "Compact topology to produce fast, deterministic demo output.",
+      "goal": "Quick walkthrough for judges with low latency."
+    }
+  ]
+}

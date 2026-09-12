@@ -1,0 +1,499 @@
+.training-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-inline: calc(50% - 50vw + 1.5rem);
+}
+
+/* Tabs Container */
+.tabs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+}
+
+.tabs-header {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--line-strong);
+  overflow-x: clip;
+  padding: 0 0.6rem;
+}
+
+@media (max-width: 1100px) {
+  .tabs-header {
+    overflow-x: auto;
+  }
+}
+
+.tab-button {
+  padding: 0.82rem 1.2rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tab-button:hover {
+  color: var(--ink);
+}
+
+.tab-button.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.tab-content {
+  padding: 1.2rem 1.2rem 1.35rem;
+}
+
+.tab-pane {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tab-pane h3 {
+  margin: 0 0 1.2rem 0;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.training-hint,
+.training-warning {
+  margin: 0 0 0.75rem;
+  padding: 0.52rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+.training-hint {
+  background: var(--bg);
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+}
+
+.training-warning {
+  background: rgba(210, 155, 69, 0.18);
+  border: 1px solid rgba(210, 155, 69, 0.4);
+  color: var(--warning);
+}
+
+/* Empty State */
+.empty-state {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* MARL Container */
+.marl-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.marl-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+}
+
+.marl-info p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.marl-info strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chart-placeholder {
+  padding: 2rem 1.5rem;
+  background: linear-gradient(135deg, rgba(44, 44, 50, 0.46), rgba(18, 18, 20, 0.44));
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  color: var(--muted);
+}
+
+.chart-placeholder p:first-child {
+  font-size: 1.65rem;
+  margin: 0 0 0.5rem 0;
+}
+
+.chart-placeholder .muted {
+  font-size: 0.84rem;
+  margin: 0;
+}
+
+/* Cost Models Container */
+.cost-models-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.model-card {
+  padding: 1rem;
+  background: var(--bg);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.model-card.active {
+  border-color: var(--good);
+  background: rgba(86, 184, 112, 0.14);
+}
+
+.model-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-soft);
+}
+
+.model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.model-header h4 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.badge {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-active {
+  background: var(--good);
+  color: #051008;
+}
+
+.badge-inactive {
+  background: rgba(143, 143, 152, 0.2);
+  color: var(--neutral);
+}
+
+.model-info {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.model-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-small {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.add-model-form {
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.add-model-form h4 {
+  margin: 0 0 0.4rem 0;
+  color: var(--ink);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+
+.form-input {
+  padding: 0.58rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-alt);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.86rem;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(220, 220, 225, 0.22);
+}
+
+/* Jobs Container */
+.jobs-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.job-card {
+  padding: 1rem;
+  background: var(--bg);
+  border-left: 4px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.job-card.job-completed {
+  border-left-color: var(--good);
+}
+
+.job-card.job-running {
+  border-left-color: var(--info);
+}
+
+.job-card.job-queued {
+  border-left-color: var(--neutral);
+  opacity: 0.8;
+}
+
+.job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.job-header h4 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.status-badge {
+  padding: 0.28rem 0.62rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-completed {
+  background: var(--good);
+  color: #051008;
+}
+
+.status-running {
+  background: var(--info);
+  color: #edf2ff;
+}
+
+.status-queued {
+  background: rgba(143, 143, 152, 0.22);
+  border: 1px solid rgba(143, 143, 152, 0.42);
+  color: var(--neutral);
+}
+
+.status-idle {
+  background: rgba(143, 143, 152, 0.22);
+  border: 1px solid rgba(143, 143, 152, 0.42);
+  color: var(--neutral);
+}
+
+.status-failed {
+  background: var(--danger);
+  color: #ffe9e9;
+}
+
+.progress-bar {
+  height: 7px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 0.4rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--info), var(--good));
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.queue-controls {
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.queue-controls h4 {
+  margin: 0 0 0.4rem 0;
+  color: var(--ink);
+}
+
+/* Pipeline Tab */
+.pipeline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.pipeline-card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.pipeline-running {
+  border-color: var(--info);
+}
+
+.pipeline-completed {
+  border-color: var(--good);
+}
+
+.pipeline-failed {
+  border-color: var(--danger);
+}
+
+.pipeline-queued,
+.pipeline-idle {
+  border-color: rgba(143, 143, 152, 0.42);
+  background: rgba(143, 143, 152, 0.08);
+}
+
+.pipeline-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.pipeline-head h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.pipeline-meta,
+.pipeline-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+@media (min-width: 1760px) {
+  .training-page {
+    width: 1640px;
+    margin-inline: auto;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .training-page {
+    gap: 1.2rem;
+    margin-inline: 0;
+  }
+
+  .cost-models-container,
+  .jobs-container {
+    grid-template-columns: 1fr;
+  }
+
+  .tab-button {
+    padding: 0.75rem 0.95rem;
+    font-size: 0.88rem;
+  }
+
+  .tab-content {
+    padding: 1.1rem;
+  }
+
+  .marl-info {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .tab-button {
+    padding: 0.58rem 0.72rem;
+    font-size: 0.78rem;
+  }
+
+  .model-header,
+  .job-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "small_office_10n",
+  "description": "10-node small office network — reception, 5 workstations, dev server, web server, database, router",
+  "nodes": [
+    {"node_id": "internet_gateway", "node_type": "router",      "software": "pfSense",    "version": "2.5.2", "is_entry_point": true, "is_critical_asset": false, "description": "Internet-facing gateway"},
+    {"node_id": "reception_pc",     "node_type": "workstation", "software": "Windows",    "version": "10",    "is_entry_point": false, "is_critical_asset": false, "description": "Reception workstation"},
+    {"node_id": "dev_laptop",       "node_type": "workstation", "software": "Ubuntu",     "version": "20.04", "is_entry_point": false, "is_critical_asset": false, "description": "Developer laptop with VPN access"},
+    {"node_id": "sales_laptop",     "node_type": "workstation", "software": "Windows",    "version": "10",    "is_entry_point": false, "is_critical_asset": false, "description": "Sales laptop"},
+    {"node_id": "vpn_client_old",   "node_type": "workstation", "software": "VpnClient",  "version": "2.1",   "is_entry_point": false, "is_critical_asset": false, "description": "Workstation with outdated VPN client"},
+    {"node_id": "file_server",      "node_type": "server",      "software": "Samba",      "version": "4.13.0","is_entry_point": false, "is_critical_asset": false, "description": "Internal file share"},
+    {"node_id": "web_server",       "node_type": "server",      "software": "Apache",     "version": "2.4.49","is_entry_point": true,  "is_critical_asset": false, "description": "Public-facing web server"},
+    {"node_id": "dev_server",       "node_type": "server",      "software": "Jenkins",    "version": "2.289", "is_entry_point": false, "is_critical_asset": false, "description": "CI/CD build server"},
+    {"node_id": "customer_db",      "node_type": "database",    "software": "PostgreSQL", "version": "13.4",  "is_entry_point": false, "is_critical_asset": true,  "description": "Customer database — PRIMARY TARGET"},
+    {"node_id": "backup_server",    "node_type": "server",      "software": "Rsync",      "version": "3.2.3", "is_entry_point": false, "is_critical_asset": false, "description": "Backup storage server"}
+  ],
+  "edges": [
+    {"source": "internet_gateway", "target": "web_server",     "connection_type": "http",  "has_firewall": true,  "permission_level": "read"},
+    {"source": "internet_gateway", "target": "vpn_client_old", "connection_type": "vpn",   "has_firewall": true,  "permission_level": "write"},
+    {"source": "web_server",       "target": "customer_db",    "connection_type": "sql",   "has_firewall": false, "permission_level": "write"},
+    {"source": "web_server",       "target": "dev_server",     "connection_type": "http",  "has_firewall": false, "permission_level": "read"},
+    {"source": "vpn_client_old",   "target": "dev_server",     "connection_type": "ssh",   "has_firewall": false, "permission_level": "admin"},
+    {"source": "dev_server",       "target": "customer_db",    "connection_type": "sql",   "has_firewall": false, "permission_level": "admin"},
+    {"source": "dev_server",       "target": "file_server",    "connection_type": "ssh",   "has_firewall": false, "permission_level": "admin"},
+    {"source": "dev_laptop",       "target": "dev_server",     "connection_type": "ssh",   "has_firewall": false, "permission_level": "admin"},
+    {"source": "reception_pc",     "target": "file_server",    "connection_type": "ftp",   "has_firewall": false, "permission_level": "read"},
+    {"source": "sales_laptop",     "target": "file_server",    "connection_type": "ftp",   "has_firewall": false, "permission_level": "read"},
+    {"source": "file_server",      "target": "backup_server",  "connection_type": "ssh",   "has_firewall": false, "permission_level": "write"},
+    {"source": "customer_db",      "target": "backup_server",  "connection_type": "ssh",   "has_firewall": false, "permission_level": "write"}
+  ]
+}
