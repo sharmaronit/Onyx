@@ -4,6 +4,7 @@ import threading
 import win32event
 import win32service
 import win32serviceutil
+import servicemanager
 
 from .credentials import CredentialStore
 from .runtime import AgentRunner
@@ -35,4 +36,7 @@ class OnyxEndpointAgentService(win32serviceutil.ServiceFramework):
 
 
 def run_service() -> None:
-    win32serviceutil.HandleCommandLine(OnyxEndpointAgentService)
+    """Enter the Windows Service Control Manager dispatcher."""
+    servicemanager.Initialize("OnyxEndpointAgent", None)
+    servicemanager.PrepareToHostSingle(OnyxEndpointAgentService)
+    servicemanager.StartServiceCtrlDispatcher()

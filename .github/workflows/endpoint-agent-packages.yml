@@ -9,7 +9,7 @@ on:
       version:
         description: Version to package
         required: true
-        default: 1.0.0
+        default: 1.0.1
   push:
     branches: [main]
     paths: [agent/**, .github/workflows/endpoint-agent-packages.yml]
@@ -29,7 +29,7 @@ jobs:
           python -m pip install -r agent/requirements.txt
       - name: Build unsigned development MSI
         shell: powershell
-        run: agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.0.0' }}' -AllowUnsignedDevelopmentBuild
+        run: agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.0.1' }}' -AllowUnsignedDevelopmentBuild
       - uses: actions/upload-artifact@v4
         with:
           name: OnyxAgent-windows-x64
@@ -66,7 +66,7 @@ jobs:
           path: agent/packaging/macos/artifacts
           merge-multiple: true
       - name: Assemble universal macOS installer
-        run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.0.0' }}'
+        run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.0.1' }}'
       - uses: actions/upload-artifact@v4
         with:
           name: OnyxAgent-macos-universal
@@ -83,8 +83,8 @@ jobs:
       - name: Publish development installers to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: agent-v${{ inputs.version || '1.0.0' }}-dev
-          name: Onyx Agent ${{ inputs.version || '1.0.0' }} development installers
+          tag_name: agent-v${{ inputs.version || '1.0.1' }}-dev
+          name: Onyx Agent ${{ inputs.version || '1.0.1' }} development installers
           prerelease: false
           make_latest: true
           generate_release_notes: false

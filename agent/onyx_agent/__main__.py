@@ -1,6 +1,8 @@
 import argparse
 import getpass
+import os
 import platform
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -14,15 +16,35 @@ def data_dir() -> Path:
     return Path(r"C:\ProgramData\Onyx" if platform.system() == "Windows" else "/Library/Application Support/Onyx")
 
 
+def platform_name() -> str:
+    return "macOS" if platform.system() == "Darwin" else platform.system()
+
+
+def require_administrator() -> None:
+    if platform.system() == "Windows":
+        import ctypes
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            raise PermissionError("Run enrollment from PowerShell opened with Run as administrator")
+    elif platform.system() == "Darwin" and os.geteuid() != 0:
+        raise PermissionError("Run enrollment with sudo")
+
+
 def enroll(args: argparse.Namespace) -> int:
+    require_administrator()
     server_url = args.server_url.rstrip("/")
     token = getpass.getpass("One-use enrollment token: ")
     endpoint_id = str(uuid.uuid4())
     try:
-        response = ApiClient(server_url).request("POST", "/api/device-enrollment/exchange", {"enrollment_token": token, "endpoint_id": endpoint_id, "platform": platform.system()})
+        response = ApiClient(server_url).request("POST", "/api/device-enrollment/exchange", {"enrollment_token": token, "endpoint_id": endpoint_id, "platform": platform_name()})
     finally:
         token = ""  # Do not keep enrollment secrets after exchange.
     CredentialStore(data_dir()).save({"server_url": server_url, "endpoint_id": endpoint_id, "organization_id": response["organization_id"], "device_credential": response["device_credential"], "queue_key": new_queue_key(), "topology": args.topology})
+    if platform.system() == "Windows":
+        started = subprocess.run(["sc.exe", "start", "OnyxEndpointAgent"], capture_output=True, text=True)
+        if started.returncode != 0 and "already running" not in (started.stdout + started.stderr).lower():
+            print("Enrollment succeeded. Start the Onyx Endpoint Agent service from Services or reboot this laptop.")
+    elif platform.system() == "Darwin":
+        subprocess.run(["/bin/launchctl", "kickstart", "-k", "system/com.onyx.endpoint-agent"], check=False, capture_output=True)
     print(f"Enrolled endpoint {endpoint_id} in organization {response['organization_id']}")
     return 0
 
