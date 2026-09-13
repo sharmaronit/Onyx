@@ -25,9 +25,16 @@ $smokeOutput = & $agentExe status 2>&1
 if ($LASTEXITCODE -ne 1 -or ($smokeOutput -join "`n") -notmatch "Not enrolled") {
     throw "Packaged agent command-line smoke test failed: $($smokeOutput -join ' ')"
 }
-$serviceSmokeOutput = & $agentExe service 2>&1
-if ($LASTEXITCODE -ne 1 -or ($serviceSmokeOutput -join "`n") -notmatch "StartServiceCtrlDispatcher|service controller") {
-    throw "Packaged Windows service dispatcher smoke test failed: $($serviceSmokeOutput -join ' ')"
+$serviceSmokeOut = Join-Path $env:TEMP "onyx-service-smoke-$PID.out"
+$serviceSmokeErr = Join-Path $env:TEMP "onyx-service-smoke-$PID.err"
+try {
+    $serviceSmoke = Start-Process -FilePath $agentExe -ArgumentList 'service' -RedirectStandardOutput $serviceSmokeOut -RedirectStandardError $serviceSmokeErr -Wait -PassThru -WindowStyle Hidden
+    $serviceSmokeOutput = @((Get-Content $serviceSmokeOut -ErrorAction SilentlyContinue), (Get-Content $serviceSmokeErr -ErrorAction SilentlyContinue)) -join "`n"
+    if ($serviceSmoke.ExitCode -ne 1 -or $serviceSmokeOutput -notmatch "StartServiceCtrlDispatcher|service controller") {
+        throw "Packaged Windows service dispatcher smoke test failed: $serviceSmokeOutput"
+    }
+} finally {
+    Remove-Item $serviceSmokeOut, $serviceSmokeErr -Force -ErrorAction SilentlyContinue
 }
 $desktopExeCandidate = Join-Path $root "..\desktop\src-tauri\target\release\onyx-desktop.exe"
 if (-not (Test-Path $desktopExeCandidate)) {
