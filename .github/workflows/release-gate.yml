@@ -21,7 +21,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      # Keep the committed lock while allowing npm to select the native optional
+      # packages for the current GitHub runner.
+      - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm run build
