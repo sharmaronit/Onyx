@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.1.0",
+    [string]$Version = "1.1.1",
     [switch]$AllowUnsignedDevelopmentBuild
 )
 $ErrorActionPreference = "Stop"
@@ -20,6 +20,10 @@ try {
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) { throw "WiX v4 is required. Install WiX, then rerun this script." }
 $agentExe = Resolve-Path (Join-Path $out "OnyxAgent.exe")
+$smokeOutput = & $agentExe status 2>&1
+if ($LASTEXITCODE -ne 1 -or ($smokeOutput -join "`n") -notmatch "Not enrolled") {
+    throw "Packaged agent command-line smoke test failed: $($smokeOutput -join ' ')"
+}
 $desktopExeCandidate = Join-Path $root "..\desktop\src-tauri\target\release\onyx-desktop.exe"
 if (-not (Test-Path $desktopExeCandidate)) {
     throw "Desktop executable cannot be found at $desktopExeCandidate. Build it first with: cd desktop; npm.cmd run tauri build -- --no-bundle"

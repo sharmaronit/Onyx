@@ -2,7 +2,7 @@
 set -euo pipefail
 AGENT_DIR="/Library/Application Support/Onyx"
 PLIST="/Library/LaunchDaemons/com.onyx.endpoint-agent.plist"
-mkdir -p "$AGENT_DIR"
+mkdir -p "$AGENT_DIR" "$AGENT_DIR/logs"
 ARCH="$(uname -m)"
 case "$ARCH" in
   arm64) SOURCE="$AGENT_DIR/bin/OnyxAgent-arm64" ;;
@@ -13,6 +13,7 @@ cp "$SOURCE" "$AGENT_DIR/OnyxAgent"
 chown -R root:wheel "$AGENT_DIR"
 chmod 700 "$AGENT_DIR"
 chmod 755 "$AGENT_DIR/OnyxAgent"
+chmod 700 "$AGENT_DIR/logs"
 chown root:wheel "$PLIST"
 chmod 644 "$PLIST"
 mkdir -p /usr/local/bin

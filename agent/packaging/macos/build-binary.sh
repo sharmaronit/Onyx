@@ -8,3 +8,8 @@ python3 -m pip install -r "$ROOT/requirements.txt"
 cd "$ROOT"
 python3 -m PyInstaller --clean --noconfirm --onefile --name "OnyxAgent-$ARCH" onyx_agent_entry.py
 test "$(uname -m)" = "$RUNNER_ARCH" || { echo "Build this binary on a $RUNNER_ARCH Mac runner." >&2; exit 2; }
+set +e
+SMOKE_OUTPUT="$("$ROOT/dist/OnyxAgent-$ARCH" status 2>&1)"
+SMOKE_STATUS=$?
+set -e
+[[ "$SMOKE_STATUS" = "1" && "$SMOKE_OUTPUT" == *"Not enrolled"* ]] || { echo "Packaged agent command-line smoke test failed: $SMOKE_OUTPUT" >&2; exit 3; }

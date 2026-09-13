@@ -1,4 +1,5 @@
 import argparse
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -26,13 +27,34 @@ class AgentInstallLifecycleTests(unittest.TestCase):
         self.assertIn("launchctl bootstrap", script)
         self.assertIn("Open Onyx Agent", script)
 
-    def test_windows_installer_defers_first_service_start_and_includes_desktop(self):
+    def test_packaged_binaries_are_smoke_tested_before_distribution(self):
+        windows = Path("agent/packaging/windows/Build-WindowsInstaller.ps1").read_text(encoding="utf-8")
+        macos = Path("agent/packaging/macos/build-binary.sh").read_text(encoding="utf-8")
+        self.assertIn("Packaged agent command-line smoke test failed", windows)
+        self.assertIn("Packaged agent command-line smoke test failed", macos)
+
+    def test_macos_assembly_does_not_reference_missing_installer_directory(self):
+        workflow = Path(".github/workflows/endpoint-agent-packages.yml").read_text(encoding="utf-8")
+        self.assertNotIn("cd installers", workflow)
+
+    def test_windows_installer_starts_service_and_includes_desktop(self):
         wix = Path("agent/packaging/windows/OnyxAgent.wxs").read_text(encoding="utf-8")
         self.assertIn('Start="auto"', wix)
-        self.assertNotIn('Start="install"', wix)
+        self.assertIn('Start="install"', wix)
         self.assertIn("OnyxDesktopExe", wix)
         self.assertIn("LaunchOnyxDesktop", wix)
         self.assertIn("Windows\\CurrentVersion\\Run", wix)
+
+    def test_cli_parses_arguments_before_dispatch(self):
+        marker = argparse.Namespace(called=False)
+
+        def fake_status(_):
+            marker.called = True
+            return 0
+
+        with patch.object(sys, "argv", ["onyx-agent", "status"]), patch.object(cli, "status", fake_status):
+            self.assertEqual(cli.main(), 0)
+        self.assertTrue(marker.called)
 
 
 if __name__ == "__main__":

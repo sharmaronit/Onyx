@@ -86,6 +86,7 @@ def main() -> int:
     if platform.system() == "Windows":
         service_p = sub.add_parser("service")
         service_p.set_defaults(func=lambda _: __import__("onyx_agent.windows_service", fromlist=["run_service"]).run_service() or 0)
+    args = parser.parse_args()
     try: return args.func(args)
     except (ApiError, OSError, ValueError) as exc: print(f"Onyx Agent error: {exc}"); return 1
 

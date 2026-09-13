@@ -1,6 +1,6 @@
 [package]
 name = "onyx-desktop"
-version = "1.1.0"
+version = "1.1.1"
 description = "Onyx Endpoint Agent desktop status application"
 authors = ["Onyx"]
 edition = "2021"

@@ -4,7 +4,7 @@ permissions:
   contents: write
 
 env:
-  PACKAGE_VERSION: ${{ inputs.version || '1.1.0' }}
+  PACKAGE_VERSION: ${{ inputs.version || '1.1.1' }}
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
       version:
         description: Version to package
         required: true
-        default: 1.1.0
+        default: 1.1.1
   push:
     branches: [main]
     paths: [agent/**, desktop/**, .github/workflows/endpoint-agent-packages.yml]
@@ -53,7 +53,7 @@ jobs:
             [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:ONYX_WINDOWS_CERTIFICATE_PFX_BASE64))
             $env:ONYX_WINDOWS_SIGNING_PFX = $certificatePath
           }
-          agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.1.0' }}' -AllowUnsignedDevelopmentBuild
+          agent/packaging/windows/Build-WindowsInstaller.ps1 -Version '${{ inputs.version || '1.1.1' }}' -AllowUnsignedDevelopmentBuild
       - name: Generate software bills of materials
         shell: powershell
         run: |
@@ -133,12 +133,6 @@ jobs:
         with:
           path: agent/packaging/macos/artifacts
           merge-multiple: true
-      - name: Create versioned release manifest
-        run: |
-          cd installers
-          MANIFEST="$RUNNER_TEMP/OnyxAgent-$PACKAGE_VERSION-release-manifest.sha256"
-          find . -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > "$MANIFEST"
-          mv "$MANIFEST" .
       - name: Import Apple Developer ID certificates
         if: env.APPLE_CERTIFICATE_P12_BASE64 != ''
         run: |
@@ -152,7 +146,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$RUNNER_TEMP" "$KEYCHAIN_PATH"
       - name: Assemble universal macOS installer
-        run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.1.0' }}'
+        run: bash agent/packaging/macos/build-universal-dmg.sh '${{ inputs.version || '1.1.1' }}'
       - uses: actions/upload-artifact@v4
         with:
           name: OnyxAgent-macos-universal
@@ -169,8 +163,8 @@ jobs:
       - name: Publish development installers to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: agent-v${{ inputs.version || '1.1.0' }}-dev
-          name: Onyx Agent ${{ inputs.version || '1.1.0' }} development installers
+          tag_name: agent-v${{ inputs.version || '1.1.1' }}-dev
+          name: Onyx Agent ${{ inputs.version || '1.1.1' }} development installers
           prerelease: true
           make_latest: true
           generate_release_notes: false
@@ -187,8 +181,8 @@ jobs:
       - name: Publish Windows development installer
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: agent-v${{ inputs.version || '1.1.0' }}-windows
-          name: Onyx Agent ${{ inputs.version || '1.1.0' }} Windows installer
+          tag_name: agent-v${{ inputs.version || '1.1.1' }}-windows
+          name: Onyx Agent ${{ inputs.version || '1.1.1' }} Windows installer
           prerelease: true
           make_latest: false
           generate_release_notes: false
