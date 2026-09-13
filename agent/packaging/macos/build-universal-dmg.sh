@@ -34,25 +34,39 @@ cat > "$STAGE/Applications/Onyx Agent.app/Contents/Info.plist" <<PLIST
 PLIST
 if [[ "$SIGNED" = "1" ]]; then
   codesign --force --deep --options runtime --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$STAGE/Applications/Onyx Agent.app"
+  : "${APPLE_ID:?APPLE_ID is required for notarization}"
+  : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
+  : "${APPLE_APP_PASSWORD:?APPLE_APP_PASSWORD is required for notarization}"
+  APP_ZIP="${RUNNER_TEMP:-/tmp}/OnyxAgent-$VERSION-app.zip"
+  ditto -c -k --keepParent "$STAGE/Applications/Onyx Agent.app" "$APP_ZIP"
+  xcrun notarytool submit "$APP_ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  xcrun stapler staple "$STAGE/Applications/Onyx Agent.app"
+  xcrun stapler validate "$STAGE/Applications/Onyx Agent.app"
+  spctl --assess --type execute --verbose=2 "$STAGE/Applications/Onyx Agent.app"
 else
   codesign --force --deep --sign - "$STAGE/Applications/Onyx Agent.app"
 fi
+codesign --verify --deep --strict --verbose=2 "$STAGE/Applications/Onyx Agent.app"
 COMPONENT_PKG="$OUT/OnyxAgent-$VERSION-component.pkg"
 FINAL_PKG="$OUT/OnyxAgent-$VERSION-macos-universal.pkg"
 pkgbuild --root "$STAGE" --scripts "$ROOT/packaging/macos/scripts" --identifier com.onyx.endpoint-agent --version "$VERSION" --install-location / "$COMPONENT_PKG"
 if [[ "$SIGNED" = "1" ]]; then
   productbuild --package "$COMPONENT_PKG" --sign "$APPLE_INSTALLER_IDENTITY" "$FINAL_PKG"
+  pkgutil --check-signature "$FINAL_PKG"
+  xcrun notarytool submit "$FINAL_PKG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  xcrun stapler staple "$FINAL_PKG"
+  xcrun stapler validate "$FINAL_PKG"
+  spctl --assess --type install --verbose=2 "$FINAL_PKG"
 else
   mv "$COMPONENT_PKG" "$FINAL_PKG"
 fi
 hdiutil create -volname "Onyx Agent" -srcfolder "$OUT/OnyxAgent-$VERSION-macos-universal.pkg" -ov -format UDZO "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
 if [[ "$SIGNED" = "1" ]]; then
   codesign --force --timestamp --sign "$APPLE_APPLICATION_IDENTITY" "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
-  : "${APPLE_ID:?APPLE_ID is required for notarization}"
-  : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
-  : "${APPLE_APP_PASSWORD:?APPLE_APP_PASSWORD is required for notarization}"
+  codesign --verify --strict --verbose=2 "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
   xcrun notarytool submit "$OUT/OnyxAgent-$VERSION-macos-universal.dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
   xcrun stapler staple "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
   xcrun stapler validate "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$OUT/OnyxAgent-$VERSION-macos-universal.dmg"
 fi
 shasum -a 256 "$OUT/OnyxAgent-$VERSION-macos-universal.pkg" "$OUT/OnyxAgent-$VERSION-macos-universal.dmg" > "$OUT/OnyxAgent-$VERSION-macos-universal.sha256.txt"

@@ -32,3 +32,5 @@ The GitHub package workflow supports these repository secrets:
 - Apple notarization: `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`
 
 Without Windows signing, SmartScreen may warn. Without Apple Developer ID signing and notarization, Gatekeeper may identify the downloaded package as unsafe. Do not distribute unsigned builds to employee laptops.
+
+The macOS release job now fails closed when any Apple credential is absent. It notarizes and staples both the signed installer package and the signed DMG, then runs `codesign`, `pkgutil`, `stapler`, and `spctl` verification before publication. An ad-hoc signed development DMG is not a customer-distribution build and must not be published as one.

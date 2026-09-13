@@ -37,6 +37,16 @@ class AgentInstallLifecycleTests(unittest.TestCase):
         workflow = Path(".github/workflows/endpoint-agent-packages.yml").read_text(encoding="utf-8")
         self.assertNotIn("cd installers", workflow)
 
+    def test_macos_release_requires_notarization_and_gatekeeper_verification(self):
+        workflow = Path(".github/workflows/endpoint-agent-packages.yml").read_text(encoding="utf-8")
+        build = Path("agent/packaging/macos/build-universal-dmg.sh").read_text(encoding="utf-8")
+        self.assertIn("Require Apple distribution credentials", workflow)
+        self.assertGreaterEqual(build.count("xcrun notarytool submit"), 3)
+        self.assertGreaterEqual(build.count("xcrun stapler validate"), 3)
+        self.assertIn("spctl --assess --type install", build)
+        self.assertIn("spctl --assess --type execute", build)
+        self.assertIn("spctl --assess --type open", build)
+
     def test_windows_installer_starts_service_and_includes_desktop(self):
         wix = Path("agent/packaging/windows/OnyxAgent.wxs").read_text(encoding="utf-8")
         self.assertIn('Start="auto"', wix)
