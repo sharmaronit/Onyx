@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-VERSION="${1:-1.1.1}"
+VERSION="${1:-1.1.2}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; OUT="$ROOT/dist"; STAGE="$ROOT/build/macos-root"
 ARM="$ROOT/packaging/macos/artifacts/OnyxAgent-arm64"; X64="$ROOT/packaging/macos/artifacts/OnyxAgent-x64"
 DESKTOP_ARM="$ROOT/packaging/macos/artifacts/OnyxDesktop-arm64"; DESKTOP_X64="$ROOT/packaging/macos/artifacts/OnyxDesktop-x64"

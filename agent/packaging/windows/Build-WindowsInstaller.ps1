@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.1.1",
+    [string]$Version = "1.1.2",
     [switch]$AllowUnsignedDevelopmentBuild
 )
 $ErrorActionPreference = "Stop"
@@ -15,6 +15,7 @@ try {
         --hidden-import servicemanager --hidden-import win32timezone `
         --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event `
         --hidden-import win32file --hidden-import win32pipe --hidden-import win32security --hidden-import pywintypes `
+        --hidden-import onyx_agent.windows_service `
         onyx_agent_entry.py
 } finally { Pop-Location }
 $wix = Get-Command wix -ErrorAction SilentlyContinue
@@ -23,6 +24,10 @@ $agentExe = Resolve-Path (Join-Path $out "OnyxAgent.exe")
 $smokeOutput = & $agentExe status 2>&1
 if ($LASTEXITCODE -ne 1 -or ($smokeOutput -join "`n") -notmatch "Not enrolled") {
     throw "Packaged agent command-line smoke test failed: $($smokeOutput -join ' ')"
+}
+$serviceSmokeOutput = & $agentExe service 2>&1
+if ($LASTEXITCODE -ne 1 -or ($serviceSmokeOutput -join "`n") -notmatch "StartServiceCtrlDispatcher|service controller") {
+    throw "Packaged Windows service dispatcher smoke test failed: $($serviceSmokeOutput -join ' ')"
 }
 $desktopExeCandidate = Join-Path $root "..\desktop\src-tauri\target\release\onyx-desktop.exe"
 if (-not (Test-Path $desktopExeCandidate)) {

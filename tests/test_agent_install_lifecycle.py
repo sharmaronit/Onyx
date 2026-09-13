@@ -31,7 +31,15 @@ class AgentInstallLifecycleTests(unittest.TestCase):
         windows = Path("agent/packaging/windows/Build-WindowsInstaller.ps1").read_text(encoding="utf-8")
         macos = Path("agent/packaging/macos/build-binary.sh").read_text(encoding="utf-8")
         self.assertIn("Packaged agent command-line smoke test failed", windows)
+        self.assertIn("--hidden-import onyx_agent.windows_service", windows)
+        self.assertIn("Packaged Windows service dispatcher smoke test failed", windows)
         self.assertIn("Packaged agent command-line smoke test failed", macos)
+
+    def test_windows_ci_installs_and_starts_the_built_msi(self):
+        workflow = Path(".github/workflows/endpoint-agent-packages.yml").read_text(encoding="utf-8")
+        self.assertIn("Install and exercise Windows service", workflow)
+        self.assertIn("Get-Service OnyxEndpointAgent", workflow)
+        self.assertIn("expected Running", workflow)
 
     def test_macos_assembly_does_not_reference_missing_installer_directory(self):
         workflow = Path(".github/workflows/endpoint-agent-packages.yml").read_text(encoding="utf-8")
